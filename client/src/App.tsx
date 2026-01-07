@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { getSolanaPrice } from './api';
-import './index.css';
+import './App.css';
 
-function App() {
+export default function App() {
   // 1. ALL STATES (Old HUD + New Price)
   const [isActive, setIsActive] = useState(false);
   const [battery, setBattery] = useState(100);
@@ -41,5 +41,3 @@ function App() {
     </div>
   );
 }
-
-export default App;
