@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 export default function NetworkPanel() {
   const [activeSubTab, setActiveSubTab] = useState<'WHALES' | 'AIRDROPS' | 'FUNDING'>('WHALES');
   const [searchTerm, setSearchTerm] = useState("");
-  const [dynamicData, setDynamicData] = useState<any>(null);
+  const [dynamicData, setDynamicData] = useState<any>({ success: false, whales: [], airdrops: [], price: 0 });
   
   // Persistence for pinned items (Max 5 each as requested)
   const [pinnedWhales, setPinnedWhales] = useState<string[]>([]);
@@ -46,17 +46,13 @@ export default function NetworkPanel() {
   // Strictly use Real Data from Birdeye/Backend
   const currentPins = activeSubTab === 'WHALES' ? pinnedWhales : pinnedAirdrops;
   
-  // Safe extraction with default empty arrays to prevent .map errors
-  const rawWhales = Array.isArray(dynamicData?.whales) ? dynamicData.whales : [];
-  const rawAirdrops = Array.isArray(dynamicData?.airdrops) ? dynamicData.airdrops : [];
-
   const rawList = activeSubTab === 'WHALES' 
-    ? rawWhales.map((w: any) => ({
+    ? (dynamicData?.whales || []).map((w: any) => ({
         id: w.id || w.address || `whale-${Math.random()}`,
         name: w.name || w.symbol || 'Unknown Whale',
         signal: w.signal || (w.liquidity ? `$${(w.liquidity / 1e6).toFixed(2)}M` : '0.00M')
       })) 
-    : rawAirdrops.map((a: any, idx: number) => ({
+    : (dynamicData?.airdrops || []).map((a: any, idx: number) => ({
         id: `airdrop-${idx}`,
         name: `Priority Fee: ${a.priorityFeeLevel || 'N/A'}`,
         signal: a.priorityFee ? `${(a.priorityFee / 1e6).toFixed(6)} SOL` : '0.000000 SOL'
@@ -103,7 +99,7 @@ export default function NetworkPanel() {
       </div>
 
       <div className="space-y-2 min-h-[200px]">
-        {!dynamicData ? (
+        {!dynamicData || (!dynamicData.success && dynamicData.whales.length === 0) ? (
           <div className="text-[10px] text-white/20 animate-pulse py-10 text-center uppercase">Establishing_Pulse_Sync...</div>
         ) : sortedAndFiltered.length === 0 ? (
           <div className="text-[10px] text-white/10 text-center py-10">NO_DATA_AVAILABLE</div>
