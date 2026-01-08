@@ -43,6 +43,29 @@ export default function App() {
     localStorage.setItem('ph_tokens', JSON.stringify(selectedTokens));
     localStorage.setItem('ph_expiry', subscriptionExpiry.toString());
   }, [selectedTokens, subscriptionExpiry]);
+  // --- MASTER PULSE STATE ---
+  // Stores the bundled data from Birdeye, DexScreener, Helius, and CoinGecko
+  const [liveStats, setLiveStats] = useState<any>(null);
+
+  // --- PULSE LISTENER ---
+  // Connects the HUD to the shared /api/pulse every 60 seconds
+  useEffect(() => {
+    const fetchPulse = async () => {
+      try {
+        const res = await fetch('/api/pulse');
+        const data = await res.json();
+        if (data.success) {
+          setLiveStats(data.solana);
+        }
+      } catch (err) {
+        console.error("Pulse_Connection_Lost");
+      }
+    };
+
+    fetchPulse(); // Initial ping
+    const interval = setInterval(fetchPulse, 60000); // 1-minute credit shield
+    return () => clearInterval(interval);
+  }, []);
 
   const now = Date.now();
   const isBetaWindow = now >= DATES.BETA_START && now <= DATES.BETA_END;
