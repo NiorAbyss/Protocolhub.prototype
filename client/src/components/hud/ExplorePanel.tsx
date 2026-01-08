@@ -1,33 +1,36 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 export default function ExplorePanel() {
-  const [metrics, setMetrics] = useState<any>(null);
+  const [pulse, setPulse] = useState<any>(null);
 
   useEffect(() => {
-    const fetchMetrics = async () => {
+    const sync = async () => {
       const res = await fetch('/api/pulse');
-      const data = await res.json();
-      if (data.success) setMetrics(data.solana);
+      const json = await res.json();
+      if (json.success) setPulse(json.solana);
     };
-    fetchMetrics();
-    const timer = setInterval(fetchMetrics, 60000);
-    return () => clearInterval(timer);
+    sync();
+    const interval = setInterval(sync, 60000); // 1-minute shared-ping
+    return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="grid grid-cols-2 gap-4 font-mono text-white">
-      <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl">
-        <div className="text-[9px] text-white/30 uppercase tracking-widest">Global_MCAP</div>
-        <div className="text-xl font-bold text-white">${metrics ? (metrics.mcap / 1e9).toFixed(2) + 'B' : 'SYNCING...'}</div>
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
+          <div className="text-[10px] text-white/40 uppercase">Global_MCAP</div>
+          <div className="text-lg font-bold text-cyan-400">
+            {pulse ? `$${(pulse.mcap / 1e9).toFixed(2)}B` : "SYNCING..."}
+          </div>
+        </div>
+        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
+          <div className="text-[10px] text-white/40 uppercase">Real_Time_TPS</div>
+          <div className="text-lg font-bold text-white">
+            {pulse ? pulse.tps.toFixed(0) : "---"}
+          </div>
+        </div>
       </div>
-      <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl">
-        <div className="text-[9px] text-white/30 uppercase tracking-widest">Real_Time_TPS</div>
-        <div className="text-xl font-bold text-green-500">{metrics ? metrics.tps.toFixed(0) : '---'}</div>
-      </div>
-      <div className="col-span-2 p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
-        <div className="text-[9px] text-white/30 uppercase tracking-widest">24H_Volume</div>
-        <div className="text-lg font-bold">${metrics ? (metrics.volume24h / 1e6).toFixed(1) + 'M' : '---'}</div>
-      </div>
+      {/* Narrative news feed below... */}
     </div>
   );
 }
