@@ -45,7 +45,25 @@ export default function NetworkPanel() {
 
   // Strictly use Real Data from Birdeye/Backend
   const currentPins = activeSubTab === 'WHALES' ? pinnedWhales : pinnedAirdrops;
-  const rawList = activeSubTab === 'WHALES' ? (dynamicData?.whales || []) : (dynamicData?.airdrops || []);
+  const rawList = activeSubTab === 'WHALES' 
+    ? (dynamicData?.whales || []).map((w: any) => ({
+        id: w.id || w.address || Math.random().toString(),
+        name: w.name || w.symbol || 'Unknown Whale',
+        signal: w.signal || `$${(w.liquidity / 1e6).toFixed(2)}M`
+      })) 
+    : (dynamicData?.airdrops || []).map((a: any, idx: number) => ({
+        id: `airdrop-${idx}`,
+        name: `Priority Fee: ${a.priorityFeeLevel}`,
+        signal: `${(a.priorityFee / 1e6).toFixed(6)} SOL`
+      }));
+
+  if (activeSubTab === 'FUNDING' && dynamicData?.price) {
+    rawList.push({
+      id: 'sol-price',
+      name: 'SOLANA PRICE',
+      signal: `$${dynamicData.price.toFixed(2)} USD`
+    });
+  }
 
   // SORT: Pinned items stay at top
   const sortedAndFiltered = [...rawList]

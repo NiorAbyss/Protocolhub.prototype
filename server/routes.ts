@@ -63,25 +63,43 @@ export async function registerRoutes(
     try {
       // Graceful degradation: allSettled prevents a single key failure from locking the HUD
       const results = await Promise.allSettled([
+        // Birdeye API using process.env.BIRDEYE_API_KEY for network data.
         fetch(`https://public-api.birdeye.so/v1/solana/networks`, {
           headers: { 'X-API-KEY': process.env.BIRDEYE_API_KEY || '' }
         }).then(r => r.json()),
-        // Add other real data sources here...
+        // Helius RPC using process.env.HELIUS_API_KEY for transaction logic.
+        fetch(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY || ''}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: "my-id",
+            method: "getPriorityFeeEstimate",
+            params: [{
+              "accountKeys": ["JUP6LkbZbjS1jKKccwgws655K6L3GEzS6LYVsbYwbq3"],
+              "options": { "includeAllPriorityFeeLevels": true }
+            }]
+          })
+        }).then(r => r.json()),
+        // CoinGecko API using process.env.COINGECKO_API_KEY for SOL price data.
+        fetch(`https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&x_cg_demo_api_key=${process.env.COINGECKO_API_KEY || ''}`)
+          .then(r => r.json()),
       ]);
 
       const birdeye = results[0].status === 'fulfilled' ? (results[0].value as any) : { data: [] };
+      const helius = results[1].status === 'fulfilled' ? (results[1].value as any) : { result: null };
+      const coingecko = results[2].status === 'fulfilled' ? (results[2].value as any) : { solana: { usd: 0 } };
 
-      // REAL DATA ONLY: No mocks. Send empty arrays if APIs are down.
       res.json({
         success: true, 
         whales: birdeye.data || [],
-        airdrops: [], // Map your real airdrop source here
+        airdrops: helius.result || [], // Mapping Helius results to airdrops as requested
+        price: coingecko.solana?.usd || 0,
         timestamp: new Date().toISOString()
       });
     } catch (error) {
       console.error("Pulse_Route_Failure:", error);
-      // Forced unblock
-      res.json({ success: true, whales: [], airdrops: [] });
+      res.json({ success: true, whales: [], airdrops: [], price: 0 });
     }
   });
 
