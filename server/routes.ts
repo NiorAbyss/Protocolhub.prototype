@@ -87,13 +87,13 @@ export async function registerRoutes(
       ]);
 
       const birdeye = results[0].status === 'fulfilled' ? (results[0].value as any) : { data: [] };
-      const helius = results[1].status === 'fulfilled' ? (results[1].value as any) : { result: null };
+      const helius = results[1].status === 'fulfilled' ? (results[1].value as any) : { result: { priorityFeeLevels: [] } };
       const coingecko = results[2].status === 'fulfilled' ? (results[2].value as any) : { solana: { usd: 0 } };
 
       res.json({
         success: true, 
-        whales: birdeye.data || [],
-        airdrops: helius.result || [], // Mapping Helius results to airdrops as requested
+        whales: Array.isArray(birdeye.data) ? birdeye.data : [],
+        airdrops: (helius.result && Array.isArray(helius.result.priorityFeeLevels)) ? helius.result.priorityFeeLevels : [],
         price: coingecko.solana?.usd || 0,
         timestamp: new Date().toISOString()
       });

@@ -45,30 +45,35 @@ export default function NetworkPanel() {
 
   // Strictly use Real Data from Birdeye/Backend
   const currentPins = activeSubTab === 'WHALES' ? pinnedWhales : pinnedAirdrops;
+  
+  // Safe extraction with default empty arrays to prevent .map errors
+  const rawWhales = Array.isArray(dynamicData?.whales) ? dynamicData.whales : [];
+  const rawAirdrops = Array.isArray(dynamicData?.airdrops) ? dynamicData.airdrops : [];
+
   const rawList = activeSubTab === 'WHALES' 
-    ? (dynamicData?.whales || []).map((w: any) => ({
-        id: w.id || w.address || Math.random().toString(),
+    ? rawWhales.map((w: any) => ({
+        id: w.id || w.address || `whale-${Math.random()}`,
         name: w.name || w.symbol || 'Unknown Whale',
-        signal: w.signal || `$${(w.liquidity / 1e6).toFixed(2)}M`
+        signal: w.signal || (w.liquidity ? `$${(w.liquidity / 1e6).toFixed(2)}M` : '0.00M')
       })) 
-    : (dynamicData?.airdrops || []).map((a: any, idx: number) => ({
+    : rawAirdrops.map((a: any, idx: number) => ({
         id: `airdrop-${idx}`,
-        name: `Priority Fee: ${a.priorityFeeLevel}`,
-        signal: `${(a.priorityFee / 1e6).toFixed(6)} SOL`
+        name: `Priority Fee: ${a.priorityFeeLevel || 'N/A'}`,
+        signal: a.priorityFee ? `${(a.priorityFee / 1e6).toFixed(6)} SOL` : '0.000000 SOL'
       }));
 
   if (activeSubTab === 'FUNDING' && dynamicData?.price) {
     rawList.push({
       id: 'sol-price',
       name: 'SOLANA PRICE',
-      signal: `$${dynamicData.price.toFixed(2)} USD`
+      signal: `$${Number(dynamicData.price).toFixed(2)} USD`
     });
   }
 
   // SORT: Pinned items stay at top
   const sortedAndFiltered = [...rawList]
     .sort((a, b) => (currentPins.includes(b.id) ? 1 : 0) - (currentPins.includes(a.id) ? 1 : 0))
-    .filter((item: any) => item.name?.toLowerCase().includes(searchTerm.toLowerCase()));
+    .filter((item: any) => (item.name || '').toLowerCase().includes((searchTerm || '').toLowerCase()));
 
   return (
     <div className="space-y-6 font-mono text-white p-4">
