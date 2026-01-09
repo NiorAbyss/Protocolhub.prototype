@@ -1,65 +1,54 @@
 import React, { useEffect, useState } from 'react';
 
-type SolanaStats = {
+type Pulse = {
   mcap: number;
   price: number;
-  tps: number;
+  tps:  number;
 };
 
-type Token = {
+type WhaleTradeEntry = {
+  id: string;
+  symbol: string;
+  usdValue: number;
+  solAmount: number;
+  timestamp: number;
+  wallet: string | null;
+};
+
+type TokenEntry = {
   symbol: string;
   totalUsd: number;
   count: number;
 };
 
-type Whale = {
+type AirdropEntry = {
   id: string;
-  symbol: string;
-  usdValue: number;
-  solAmount: number;
-  timestamp?: number | string;
-  wallet?: string | null;
-};
-
-type Airdrop = {
-  id: string;
-  priorityFee?: number;
-  priorityFeeLevel?: string;
-  stage?: string;
-  raw?: any;
-};
-
-type Funding = {
-  realWallets: number;
+  priorityFee: number;
+  priorityFeeLevel: string;
+  stage: string;
+  raw: any;
 };
 
 type PulseApiResponse = {
   success: boolean;
-  solana?: SolanaStats;
-  whales?: Whale[];
-  airdrops?: Airdrop[];
-  tokens?: Token[];
-  funding?: Funding;
-  timestamp?: string;
+  solana?: Pulse;
+  whales?:  WhaleTradeEntry[];
+  tokens?: TokenEntry[];
+  airdrops?: AirdropEntry[];
+  funding?: { realWallets: number };
+  timestamp?:  string;
   error?: string;
 };
 
-const PIN_KEY = 'pinnedTokens_v1';
-
 export default function ExplorePanel(): JSX.Element {
-  const [data, setData] = useState<PulseApiResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [pulse, setPulse] = useState<Pulse | null>(null);
+  const [whales, setWhales] = useState<WhaleTradeEntry[]>([]);
+  const [tokens, setTokens] = useState<TokenEntry[]>([]);
+  const [airdrops, setAirdrops] = useState<AirdropEntry[]>([]);
+  const [funding, setFunding] = useState<{ realWallets:  number } | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [search, setSearch] = useState('');
-  const [pinned, setPinned] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(PIN_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -72,24 +61,73 @@ export default function ExplorePanel(): JSX.Element {
         const res = await fetch('/api/pulse', { signal: controller.signal });
         if (!res.ok) throw new Error(`Network error: ${res.status}`);
         const json = (await res.json()) as PulseApiResponse;
+        
         if (!mounted) return;
+
         if (!json.success) {
-          setError(json.error ?? 'Unexpected response');
-          setData(null);
+          setError(json.error ?? 'Unexpected response from server');
+          setPulse(null);
+          setWhales([]);
+          setTokens([]);
+          setAirdrops([]);
+          setFunding(null);
+        } else if (json.solana) {
+          // Validate and set Solana network stats
+          const mcap = Number(json.solana.mcap ??  NaN);
+          const price = Number(json.solana. price ?? NaN);
+          const tps = Number(json.solana.tps ?? NaN);
+          
+          setPulse({
+            mcap:  Number.isFinite(mcap) ? mcap : 0,
+            price: Number.isFinite(price) ? price : 0,
+            tps: Number.isFinite(tps) ? tps : 0,
+          });
+
+          // Set whale trades (top 20 for display)
+          const whalesData = Array.isArray(json.whales) ?  json.whales.slice(0, 20) : [];
+          setWhales(whalesData);
+
+          // Set top tokens
+          const tokensData = Array. isArray(json.tokens) ? json.tokens :  [];
+          setTokens(tokensData);
+
+          // Set airdrops
+          const airdropsData = Array.isArray(json.airdrops) ? json.airdrops. slice(0, 5) : [];
+          setAirdrops(airdropsData);
+
+          // Set funding data
+          if (json.funding?. realWallets !== undefined) {
+            setFunding({
+              realWallets:  Number(json.funding.realWallets ?? 0),
+            });
+          }
+
+          // Track last sync time
+          if (json.timestamp) {
+            setLastSyncTime(new Date(json.timestamp).toLocaleTimeString());
+          }
         } else {
-          setData(json);
+          setPulse(null);
+          setWhales([]);
+          setTokens([]);
+          setAirdrops([]);
+          setFunding(null);
         }
       } catch (err: any) {
         if (err.name === 'AbortError') return;
         setError(err.message ?? 'Fetch failed');
-        setData(null);
+        setPulse(null);
+        setWhales([]);
+        setTokens([]);
+        setAirdrops([]);
+        setFunding(null);
       } finally {
         if (mounted) setLoading(false);
       }
     };
 
     sync();
-    const interval = setInterval(sync, 60000);
+    const interval = setInterval(sync, 60000); // Sync every 60 seconds
 
     return () => {
       mounted = false;
@@ -98,145 +136,131 @@ export default function ExplorePanel(): JSX.Element {
     };
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(PIN_KEY, JSON.stringify(pinned));
-    } catch {}
-  }, [pinned]);
+  const formatMcap = (mcap:  number) => `$${(mcap / 1e9).toFixed(2)}B`;
+  const formatPrice = (price:  number) => `$${price.toFixed(2)}`;
+  const formatUsd = (usd: number) => `$${(usd / 1000).toFixed(1)}k`;
 
-  const togglePin = (symbol: string) => {
-    setPinned((prev) => {
-      const exists = prev.includes(symbol);
-      if (exists) return prev.filter((s) => s !== symbol);
-      if (prev.length >= 5) {
-        // simple UX: alert; frontend can replace with toast
-        alert('You can pin up to 5 tokens only');
-        return prev;
-      }
-      return [symbol, ...prev];
-    });
-  };
-
-  const formatMcap = (mcap: number) => `$${(mcap / 1e9).toFixed(2)}B`;
-
-  const tokens = data?.tokens ?? [];
-  const whales = data?.whales ?? [];
-  const airdrops = data?.airdrops ?? [];
-
-  const filteredTokens = tokens.filter((t) =>
-    t.symbol.toLowerCase().includes(search.trim().toLowerCase())
-  );
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+          <div className="text-sm text-red-400">{error}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 p-4">
+    <div className="space-y-6">
+      {/* Network Stats Grid */}
       <div className="grid grid-cols-3 gap-4">
         <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
           <div className="text-[10px] text-white/40 uppercase">Global_MCAP</div>
           <div className="text-lg font-bold text-cyan-400">
-            {loading && !data ? 'SYNCING...' : data?.solana ? formatMcap(data.solana.mcap) : 'N/A'}
+            {loading ? 'SYNCING...' : pulse ? formatMcap(pulse. mcap) : 'N/A'}
           </div>
         </div>
+
+        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
+          <div className="text-[10px] text-white/40 uppercase">SOL_Price</div>
+          <div className="text-lg font-bold text-green-400">
+            {loading ?  '—' : pulse?. price ?  formatPrice(pulse.price) : '—'}
+          </div>
+        </div>
+
         <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
           <div className="text-[10px] text-white/40 uppercase">Real_Time_TPS</div>
           <div className="text-lg font-bold text-white">
-            {loading && !data ? '—' : data?.solana ? Math.round(data.solana.tps).toString() : '—'}
-          </div>
-        </div>
-        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
-          <div className="text-[10px] text-white/40 uppercase">SOL Price</div>
-          <div className="text-lg font-bold text-white">
-            {loading && !data ? '—' : data?.solana ? `$${data.solana.price.toFixed(2)}` : '—'}
+            {loading ? '—' : pulse ?  pulse.tps.toFixed(0) : '—'}
           </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search tokens (symbol)"
-          className="px-3 py-2 rounded bg-white/5 border border-white/10 w-64"
-        />
-        <div className="flex-1">
-          <div className="text-sm text-white/50">Pinned ({pinned.length}/5)</div>
-          <div className="flex gap-2 mt-1">
-            {pinned.length === 0 && <div className="text-xs text-white/40">No pinned tokens</div>}
-            {pinned.map((sym) => (
-              <button
-                key={sym}
-                onClick={() => togglePin(sym)}
-                className="px-2 py-1 rounded bg-cyan-600/20 text-cyan-300 text-xs"
-              >
-                {sym} ✕
-              </button>
+      {/* Top Tokens Section */}
+      {tokens.length > 0 && (
+        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
+          <div className="text-xs font-semibold text-white/60 uppercase mb-3">
+            Top_Trending_Tokens
+          </div>
+          <div className="space-y-2">
+            {tokens.map((token, idx) => (
+              <div key={token.symbol} className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-white/40 text-xs">#{idx + 1}</span>
+                  <span className="font-semibold text-white">{token.symbol}</span>
+                  <span className="text-white/30 text-xs">({token.count} trades)</span>
+                </div>
+                <span className="text-amber-300">{formatUsd(token.totalUsd)}</span>
+              </div>
             ))}
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-2 space-y-4">
-          <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
-            <div className="flex justify-between items-center">
-              <div className="text-[12px] text-white/40 uppercase">Top Tokens (Trending)</div>
-            </div>
-            <div className="mt-3 space-y-2">
-              {(search ? filteredTokens : tokens).map((t) => (
-                <div key={t.symbol} className="flex justify-between items-center">
-                  <div>
-                    <div className="font-medium">{t.symbol}</div>
-                    <div className="text-xs text-white/50">${t.totalUsd.toFixed(2)} • {t.count} tx</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => togglePin(t.symbol)}
-                      className="px-3 py-1 rounded bg-white/5 text-xs"
-                    >
-                      {pinned.includes(t.symbol) ? 'Unpin' : 'Pin'}
-                    </button>
+      {/* Whale Trades Section */}
+      {whales.length > 0 && (
+        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
+          <div className="text-xs font-semibold text-white/60 uppercase mb-3">
+            Whale_Trades (≥$2k)
+          </div>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {whales.map((whale) => (
+              <div
+                key={whale.id}
+                className="flex items-center justify-between text-sm p-2 bg-white/[0.01] rounded border border-white/5"
+              >
+                <div className="flex-1">
+                  <div className="font-semibold text-white">{whale.symbol}</div>
+                  <div className="text-xs text-white/40">
+                    {whale.solAmount.toFixed(2)} SOL
+                    {whale.wallet && ` • ${whale.wallet.slice(0, 8)}...`}
                   </div>
                 </div>
-              ))}
-              {tokens.length === 0 && !loading && <div className="text-sm text-white/50">No tokens available</div>}
-            </div>
-          </div>
-
-          <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
-            <div className="text-[12px] text-white/40 uppercase">Whales (≥ $2k)</div>
-            <div className="mt-3 space-y-2 max-h-64 overflow-auto">
-              {whales.map((w) => (
-                <div key={w.id} className="flex justify-between">
-                  <div className="text-sm">{w.symbol} — ${w.usdValue.toFixed(2)}</div>
-                  <div className="text-xs text-white/50">{w.wallet ?? '—'}</div>
+                <div className="text-right">
+                  <div className="font-bold text-cyan-400">{formatUsd(whale.usdValue)}</div>
                 </div>
-              ))}
-              {whales.length === 0 && !loading && <div className="text-sm text-white/50">No whale trades</div>}
-            </div>
+              </div>
+            ))}
           </div>
         </div>
+      )}
 
-        <div className="space-y-4">
-          <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
-            <div className="text-[12px] text-white/40 uppercase">Airdrops</div>
-            <div className="mt-3 space-y-2 max-h-48 overflow-auto">
-              {airdrops.map((a) => (
-                <div key={a.id} className="text-sm">
-                  <div className="font-medium">{a.id}</div>
-                  <div className="text-xs text-white/50">Stage: {a.stage}</div>
-                </div>
-              ))}
-              {airdrops.length === 0 && !loading && <div className="text-sm text-white/50">No airdrops</div>}
-            </div>
+      {/* Airdrops Section */}
+      {airdrops.length > 0 && (
+        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
+          <div className="text-xs font-semibold text-white/60 uppercase mb-3">
+            Active_Airdrops
           </div>
-
-          <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
-            <div className="text-[12px] text-white/40 uppercase">Funding (Real Wallets)</div>
-            <div className="text-lg font-bold text-white mt-2">{data?.funding?.realWallets ?? '—'}</div>
+          <div className="space-y-2">
+            {airdrops.map((airdrop) => (
+              <div key={airdrop.id} className="flex items-center justify-between text-sm">
+                <div>
+                  <span className="text-white/70">Stage: </span>
+                  <span className="ml-2 font-semibold text-white">{airdrop.stage}</span>
+                </div>
+                <span className="text-xs text-white/50">{airdrop.priorityFeeLevel}</span>
+              </div>
+            ))}
           </div>
         </div>
+      )}
+
+      {/* Funding / Activity Section */}
+      {funding && (
+        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
+          <div className="text-xs font-semibold text-white/60 uppercase mb-2">
+            Network_Activity
+          </div>
+          <div className="text-lg font-bold text-white">
+            {funding.realWallets. toLocaleString()} unique wallets
+          </div>
+        </div>
+      )}
+
+      {/* Footer with Last Sync Time */}
+      <div className="text-xs text-white/30 text-center">
+        {lastSyncTime ?  `Last synced: ${lastSyncTime}` : 'Awaiting first sync...'}
       </div>
-
-      {error && <div className="text-sm text-red-400">{error}</div>}
     </div>
   );
 }
