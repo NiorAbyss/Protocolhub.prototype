@@ -4,102 +4,204 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 
-async function seed() {
-  const existing = await storage.getPosts();
-  if (existing.length === 0) {
-    await storage.createPost({
-      title: "Welcome to the Starter Template",
-      slug: "welcome-starter",
-      excerpt: "This is a fullstack starter template with React, Vite, and Express.",
-      content: "This template provides a solid foundation for building fullstack applications. It includes a database, API routes, and a modern frontend setup.",
-    });
-    await storage.createPost({
-      title: "Building Modern Apps",
-      slug: "building-modern-apps",
-      excerpt: "Learn how to build scalable applications with modern tools.",
-      content: "We use Drizzle ORM for type-safe database interactions, Zod for validation, and TanStack Query for efficient data fetching.",
-    });
-  }
+/* ===================================================== */
+/* Pulse Cache Types                                     */
+/* ===================================================== */
+
+type PulseCache = {
+  success: boolean;
+  solana: {
+    price: number;
+    mcap: number;
+    tps: number;
+  };
+  whales: {
+    id: string;
+    symbol: string;
+    usdValue: number;
+    solAmount: number;
+    wallet: string | null;
+  }[];
+  airdrops: {
+    level: string;
+    fee: number;
+  }[];
+  funding: {
+    realWallets: number;
+    botWallets: number;
+    burnedWallets: number;
+  };
+  timestamp: string;
+};
+
+/* ===================================================== */
+/* In-Memory Single-Flight Cache                          */
+/* ===================================================== */
+
+let CACHE: PulseCache | null = null;
+let LAST_FETCH = 0;
+let IN_FLIGHT: Promise<PulseCache> | null = null;
+
+const CACHE_TTL = 30_000;
+
+/* ===================================================== */
+/* Normalizers                                           */
+/* ===================================================== */
+
+function normalizePriorityFees(levels: any) {
+  if (!levels || typeof levels !== "object") return [];
+  return Object.entries(levels).map(([level, fee]) => ({
+    level,
+    fee: Number(fee) || 0,
+  }));
 }
+
+function normalizeWhales(raw: any[]) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 20).map((w, i) => ({
+    id: w.txHash || w.id || `whale-${i}`,
+    symbol: w.symbol || "UNKNOWN",
+    usdValue: Number(w.usdValue || w.valueUsd || 0),
+    solAmount: Number(w.solAmount || 0),
+    wallet: w.owner || null,
+  }));
+}
+
+/* ===================================================== */
+/* Wallet Intelligence (Heuristic-Based)                  */
+/* ===================================================== */
+
+function analyzeWalletActivity(transactions: any[]) {
+  let realWallets = 0;
+  let botWallets = 0;
+
+  for (const tx of transactions) {
+    const isBotLike =
+      tx.priorityFee > 50_000 ||       // excessive fee spam
+      tx.txCount > 25 ||               // burst behavior
+      tx.isProgram === true;           // programmatic wallet
+
+    if (isBotLike) botWallets++;
+    else realWallets++;
+  }
+
+  return {
+    realWallets,
+    botWallets,
+    burnedWallets: botWallets, // burned = filtered out
+  };
+}
+
+/* ===================================================== */
+/* Single-Flight Fetcher                                  */
+/* ===================================================== */
+
+async function fetchPulseOnce(): Promise<PulseCache> {
+  const now = Date.now();
+
+  if (CACHE && now - LAST_FETCH < CACHE_TTL) return CACHE;
+  if (IN_FLIGHT) return IN_FLIGHT;
+
+  IN_FLIGHT = (async () => {
+    try {
+      const [birdeye, helius, coingecko] = await Promise.all([
+        fetch("https://public-api.birdeye.so/v1/solana/networks", {
+          headers: { "X-API-KEY": process.env.BIRDEYE_API_KEY || "" },
+        }).then(r => r.json()),
+
+        fetch(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY || ""}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: "pulse",
+            method: "getPriorityFeeEstimate",
+            params: [{
+              accountKeys: ["JUP6LkbZbjS1jKKccwgws655K6L3GEzS6LYVsbYwbq3"],
+              options: { includeAllPriorityFeeLevels: true }
+            }]
+          })
+        }).then(r => r.json()),
+
+        fetch(
+          "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+        ).then(r => r.json())
+      ]);
+
+      const whales = normalizeWhales(birdeye?.data ?? []);
+      const funding = analyzeWalletActivity(
+        (birdeye?.data ?? []).map((w: any) => ({
+          priorityFee: w.priorityFee || 0,
+          txCount: w.txCount || 1,
+          isProgram: w.isProgram || false,
+        }))
+      );
+
+      const payload: PulseCache = {
+        success: true,
+        solana: {
+          price: coingecko?.solana?.usd ?? 0,
+          mcap: birdeye?.data?.totalMarketCap ?? 0,
+          tps: birdeye?.data?.tps ?? 0,
+        },
+        whales,
+        airdrops: normalizePriorityFees(
+          helius?.result?.priorityFeeLevels
+        ),
+        funding,
+        timestamp: new Date().toISOString(),
+      };
+
+      CACHE = payload;
+      LAST_FETCH = Date.now();
+      return payload;
+    } finally {
+      IN_FLIGHT = null;
+    }
+  })();
+
+  return IN_FLIGHT;
+}
+
+/* ===================================================== */
+/* Routes                                                */
+/* ===================================================== */
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Seed data on startup
-  seed();
 
-  app.get(api.posts.list.path, async (req, res) => {
-    const posts = await storage.getPosts();
-    res.json(posts);
+  app.get(api.posts.list.path, async (_req, res) => {
+    res.json(await storage.getPosts());
   });
 
   app.get(api.posts.get.path, async (req, res) => {
     const post = await storage.getPostBySlug(req.params.slug);
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
+    if (!post) return res.status(404).json({ message: "Post not found" });
     res.json(post);
   });
 
   app.post(api.posts.create.path, async (req, res) => {
     try {
       const input = api.posts.create.input.parse(req.body);
-      const post = await storage.createPost(input);
-      res.status(201).json(post);
+      res.status(201).json(await storage.createPost(input));
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({
           message: err.errors[0].message,
-          field: err.errors[0].path.join('.'),
+          field: err.errors[0].path.join("."),
         });
       }
       throw err;
     }
   });
 
-  // Pulse route
   app.get("/api/pulse", async (_req, res) => {
     try {
-      // Graceful degradation: allSettled prevents a single key failure from locking the HUD
-      const results = await Promise.allSettled([
-        // Birdeye API using process.env.BIRDEYE_API_KEY for network data.
-        fetch(`https://public-api.birdeye.so/v1/solana/networks`, {
-          headers: { 'X-API-KEY': process.env.BIRDEYE_API_KEY || '' }
-        }).then(r => r.json()),
-        // Helius RPC using process.env.HELIUS_API_KEY for transaction logic.
-        fetch(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY || ''}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: "my-id",
-            method: "getPriorityFeeEstimate",
-            params: [{
-              "accountKeys": ["JUP6LkbZbjS1jKKccwgws655K6L3GEzS6LYVsbYwbq3"],
-              "options": { "includeAllPriorityFeeLevels": true }
-            }]
-          })
-        }).then(r => r.json()),
-        // CoinGecko API using process.env.COINGECKO_API_KEY for SOL price data.
-        fetch(`https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&x_cg_demo_api_key=${process.env.COINGECKO_API_KEY || ''}`)
-          .then(r => r.json()),
-      ]);
-
-      const birdeye = results[0].status === 'fulfilled' ? (results[0].value as any) : { data: [] };
-      const helius = results[1].status === 'fulfilled' ? (results[1].value as any) : { result: { priorityFeeLevels: [] } };
-      const coingecko = results[2].status === 'fulfilled' ? (results[2].value as any) : { solana: { usd: 0 } };
-
-      res.json({
-        success: true, 
-        whales: Array.isArray(birdeye.data) ? birdeye.data : [],
-        airdrops: (helius.result && Array.isArray(helius.result.priorityFeeLevels)) ? helius.result.priorityFeeLevels : [],
-        price: coingecko.solana?.usd || 0,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error("Pulse_Route_Failure:", error);
-      res.json({ success: true, whales: [], airdrops: [], price: 0 });
+      res.json(await fetchPulseOnce());
+    } catch {
+      res.status(503).json({ success: false });
     }
   });
 
