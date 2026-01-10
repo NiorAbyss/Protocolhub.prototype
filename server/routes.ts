@@ -3,6 +3,7 @@ import { type Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
+import axios from "axios";
 
 /* ===================================================== */
 /* Pulse Cache Types                                     */
@@ -104,29 +105,34 @@ async function fetchPulseOnce(): Promise<PulseCache> {
 
   IN_FLIGHT = (async () => {
     try {
-      const [birdeye, helius, coingecko] = await Promise.all([
-        fetch("https://public-api.birdeye.so/v1/solana/networks", {
+      const [birdeyeRes, heliusRes, cgRes] = await Promise.all([
+        axios.get("https://public-api.birdeye.so/v1/solana/networks", {
           headers: { "X-API-KEY": process.env.BIRDEYE_API_KEY || "" },
-        }).then(r => r.json()),
+        }).catch(err => {
+          console.error("BIRDEYE_ERROR:", err.response?.status, err.response?.data);
+          return { data: { data: [] } };
+        }),
 
-        fetch(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY || ""}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: "pulse",
-            method: "getPriorityFeeEstimate",
-            params: [{
-              accountKeys: ["JUP6LkbZbjS1jKKccwgws655K6L3GEzS6LYVsbYwbq3"],
-              options: { includeAllPriorityFeeLevels: true }
-            }]
-          })
-        }).then(r => r.json()),
+        axios.post(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY || ""}`, {
+          jsonrpc: "2.0",
+          id: "pulse",
+          method: "getPriorityFeeEstimate",
+          params: [{
+            accountKeys: ["JUP6LkbZbjS1jKKccwgws655K6L3GEzS6LYVsbYwbq3"],
+            options: { includeAllPriorityFeeLevels: true }
+          }]
+        }).catch(err => {
+          console.error("HELIUS_ERROR:", err.response?.status, err.response?.data);
+          return { data: { result: {} } };
+        }),
 
-        fetch(
-          "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
-        ).then(r => r.json())
+        axios.get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
+          .catch(() => ({ data: { solana: { usd: 0 } } }))
       ]);
+
+      const birdeye = birdeyeRes.data;
+      const helius = heliusRes.data;
+      const coingecko = cgRes.data;
 
       const whales = normalizeWhales(birdeye?.data ?? []);
       const funding = analyzeWalletActivity(

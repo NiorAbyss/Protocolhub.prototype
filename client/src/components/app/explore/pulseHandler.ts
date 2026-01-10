@@ -1,4 +1,5 @@
-import rateLimit from "express-rate-limit";
+import axios from "axios";
+import { type Express } from "express";
 
 /* ===================================================== */
 /* GLOBAL CACHE (single ping shared across users)         */
@@ -7,17 +8,6 @@ import rateLimit from "express-rate-limit";
 let cachedPulse: any = null;
 let lastPulseFetch = 0;
 const PULSE_TTL = 30_000;
-
-/* ===================================================== */
-/* RATE LIMITER                                           */
-/* ===================================================== */
-
-export const pulseLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
 
 /* ===================================================== */
 /* HELPERS                                                */
@@ -31,23 +21,25 @@ async function fetchRwaSupplies() {
 
   const results = await Promise.allSettled(
     Object.entries(mints).map(async ([key, mint]) => {
-      const res = await fetch(
+      const res = await axios.post(
         `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`,
         {
-          method: "POST",
+          jsonrpc: "2.0",
+          id: key,
+          method: "getTokenSupply",
+          params: [mint],
+        },
+        {
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: key,
-            method: "getTokenSupply",
-            params: [mint],
-          }),
         }
-      );
-      const json = await res.json();
+      ).catch(err => {
+        console.error(`HELIUS_ERROR [${key}]:`, err.response?.status, err.response?.data);
+        throw err;
+      });
+      
       return {
         asset: key,
-        supply: Number(json.result?.value?.uiAmount || 0),
+        supply: Number(res.data.result?.value?.uiAmount || 0),
       };
     })
   );
@@ -84,59 +76,47 @@ async function fetchLiquidityImbalance() {
 /* MAIN PULSE ROUTE                                       */
 /* ===================================================== */
 
-app.get("/api/pulse", pulseLimiter, async (_req, res) => {
-  const now = Date.now();
+export function registerPulseRoute(app: Express) {
+  app.get("/api/pulse", async (_req, res) => {
+    const now = Date.now();
 
-  if (cachedPulse && now - lastPulseFetch < PULSE_TTL) {
-    return res.json(cachedPulse);
-  }
+    if (cachedPulse && now - lastPulseFetch < PULSE_TTL) {
+      return res.json(cachedPulse);
+    }
 
-  try {
-    const results = await Promise.allSettled([
-      fetch(`https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd`)
-        .then(r => r.json()),
-      fetchRwaSupplies(),
-      fetchLiquidityImbalance(),
-    ]);
+    try {
+      const [cgRes, rwaSupplies, liquidity] = await Promise.all([
+        axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd`).then(r => r.data),
+        fetchRwaSupplies(),
+        fetchLiquidityImbalance(),
+      ]);
 
-    const solPrice =
-      results[0].status === "fulfilled"
-        ? results[0].value.solana.usd
-        : 0;
+      const solPrice = cgRes?.solana?.usd ?? 0;
 
-    const rwaSupplies =
-      results[1].status === "fulfilled"
-        ? results[1].value
-        : [];
+      const etf = computeEtfAbsorption({
+        dailyInflowUSD: 765_000_000,
+        solPrice,
+      });
 
-    const liquidity =
-      results[2].status === "fulfilled"
-        ? results[2].value
-        : null;
+      cachedPulse = {
+        success: true,
+        solana: {
+          price: solPrice,
+          tvlUSD: 4_200_000_000,
+        },
+        protocol: {
+          rwaSupplies,
+          etf,
+          liquidity,
+        },
+        timestamp: new Date().toISOString(),
+      };
 
-    const etf = computeEtfAbsorption({
-      dailyInflowUSD: 765_000_000,
-      solPrice,
-    });
-
-    cachedPulse = {
-      success: true,
-      solana: {
-        price: solPrice,
-        tvlUSD: 4_200_000_000, // can be replaced later
-      },
-      protocol: {
-        rwaSupplies,
-        etf,
-        liquidity,
-      },
-      timestamp: new Date().toISOString(),
-    };
-
-    lastPulseFetch = now;
-    res.json(cachedPulse);
-  } catch (err) {
-    console.error("PULSE_PROTOCOL_FAILURE", err);
-    res.json(cachedPulse ?? { success: false });
-  }
-});
+      lastPulseFetch = now;
+      res.json(cachedPulse);
+    } catch (err: any) {
+      console.error("PULSE_PROTOCOL_FAILURE", err.response?.status, err.response?.data || err.message);
+      res.json(cachedPulse ?? { success: false });
+    }
+  });
+}
