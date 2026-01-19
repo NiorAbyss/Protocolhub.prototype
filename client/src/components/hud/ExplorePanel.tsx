@@ -1,122 +1,53 @@
-import React, { useEffect, useState } from "react";
+import React from 'react';
 
-type PulseResponse = {
-  success: boolean;
-  solana: {
-    price: number;
-    mcap: number;
-    tps: number;
-  };
-  whales: {
-    id: string;
-    symbol: string;
-    usdValue: number;
-    solAmount: number;
-    wallet: string | null;
-  }[];
-  airdrops: {
-    level: string;
-    fee: number;
-  }[];
-  timestamp: string;
-  error?: string;
-};
-
-export default function ExplorePanel(): JSX.Element {
-  const [data, setData] = useState<PulseResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const sync = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/pulse", { signal: controller.signal });
-        const json = (await res.json()) as PulseResponse;
-
-        if (!json.success) throw new Error(json.error ?? "Pulse failed");
-        setData(json);
-      } catch (err: any) {
-        if (err.name !== "AbortError") {
-          setError(err.message ?? "Fetch failed");
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    sync();
-    const interval = setInterval(sync, 60000);
-    return () => {
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, []);
-
-  if (error) {
-    return (
-      <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400">
-        {error}
-      </div>
-    );
-  }
-
-  if (loading || !data) {
-    return <div className="text-white/40">SYNCING NETWORK...</div>;
-  }
-
+export default function ExplorePanel() {
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-3 gap-4">
-        <Stat label="MCAP" value={`$${(data.solana.mcap / 1e9).toFixed(2)}B`} />
-        <Stat label="SOL PRICE" value={`$${data.solana.price.toFixed(2)}`} />
-        <Stat label="TPS" value={data.solana.tps.toFixed(0)} />
-      </div>
+    <div className="text-cyan-400 font-mono space-y-8">
+      {/* TOP 5 AIRDROP OPPORTUNITIES */}
+      <section className="space-y-4">
+        <h2 className="text-[11px] font-bold tracking-[0.4em] uppercase text-white border-b border-cyan-900/50 pb-2">
+          Top 5 Airdrop Claims
+        </h2>
+        <div className="space-y-2">
+          {[
+            { n: 'JUPITER S2', s: 'ACTIVE', r: 'High' },
+            { n: 'DRIFT PROTOCOL', s: 'STAKING', r: 'Med' },
+            { n: 'KAMINO LEND', s: 'SNAPSHOT', r: 'High' },
+            { n: 'PARCL R3', s: 'PENDING', r: 'Med' },
+            { n: 'TENSOR SEASON', s: 'ACTIVE', r: 'High' },
+          ].map((drop, i) => (
+            <div key={i} className="flex justify-between p-3 bg-white/[0.02] border border-white/5 text-[9px]">
+              <span className="text-white font-bold">{drop.n}</span>
+              <span className="text-cyan-500 uppercase">{drop.s}</span>
+              <span className="text-gray-500">REWARD: {drop.r}</span>
+            </div>
+          ))}
+        </div>
+      </section>
 
-      <Section title="Whale Trades">
-        {data.whales.map(w => (
-          <Row key={w.id} left={w.symbol} right={`$${w.usdValue.toFixed(0)}`} />
-        ))}
-      </Section>
-
-      <Section title="Priority Fees">
-        {data.airdrops.map(a => (
-          <Row key={a.level} left={a.level} right={`${a.fee}`} />
-        ))}
-      </Section>
-
-      <div className="text-xs text-white/30 text-center">
-        Last synced: {new Date(data.timestamp).toLocaleTimeString()}
-      </div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
-      <div className="text-xs text-white/40">{label}</div>
-      <div className="text-lg font-bold text-cyan-400">{value}</div>
-    </div>
-  );
-}
-
-function Section({ title, children }: any) {
-  return (
-    <div className="p-4 bg-white/[0.02] border border-white/10 rounded-xl">
-      <div className="text-xs text-white/60 mb-2">{title}</div>
-      <div className="space-y-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({ left, right }: { left: string; right: string }) {
-  return (
-    <div className="flex justify-between text-sm">
-      <span>{left}</span>
-      <span className="text-cyan-400">{right}</span>
+      {/* TOP 5 GLOBAL MEME SENTIMENT */}
+      <section className="space-y-4">
+        <h2 className="text-[11px] font-bold tracking-[0.4em] uppercase text-white border-b border-cyan-900/50 pb-2">
+          Global Meme Pulse (Top 5)
+        </h2>
+        <div className="grid grid-cols-1 gap-2">
+          {[
+            { t: '$WIF', s: 'BULLISH', p: '98%' },
+            { t: '$POPCAT', s: 'ACCUMULATE', p: '72%' },
+            { t: '$BONK', s: 'BULLISH', p: '85%' },
+            { t: '$MEW', s: 'BULLISH', p: '91%' },
+            { t: '$BOME', s: 'VOLATILE', p: '44%' },
+          ].map((meme, i) => (
+            <div key={i} className="flex justify-between items-center p-3 bg-cyan-500/5 border border-cyan-500/10">
+              <span className="text-xs font-bold text-white tracking-widest">{meme.t}</span>
+              <div className="text-right">
+                <span className="text-[8px] block text-cyan-600 uppercase mb-1">{meme.s}</span>
+                <span className="text-[10px] text-green-500 font-bold">{meme.p} STRENGTH</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

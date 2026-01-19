@@ -95,6 +95,14 @@ export default function App() {
     setActiveTab(name);
   };
 
+  const toggleToken = (id: string) => {
+    setSelectedTokens((prev: string[]) => 
+      prev.includes(id) 
+        ? prev.filter(t => t !== id) 
+        : prev.length < 5 ? [...prev, id] : prev
+    );
+  };
+
   const btnBase: React.CSSProperties = { 
     position: 'absolute', top: '3.3%', height: '7%', zIndex: 60,
     background: 'rgba(255, 255, 255, 0.02)', 
@@ -151,7 +159,7 @@ export default function App() {
 <PanelWrapper active={activeTab === 'NETWORK'} onClose={() => setActiveTab('NONE')}>
   <NetworkPanel 
     selectedTokens={selectedTokens} 
-    setSelectedTokens={setSelectedTokens} 
+    toggleToken={toggleToken} 
   />
 </PanelWrapper>
 <PanelWrapper active={activeTab === 'ABOUT'} onClose={() => setActiveTab('NONE')}><AboutPanel /></PanelWrapper>
