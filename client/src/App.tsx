@@ -7,12 +7,6 @@ import ExplorePanel from './components/hud/ExplorePanel';
 import SearchPanel from './components/hud/SearchPanel';
 import NetworkPanel from './components/hud/NetworkPanel'; // PLUGGED IN
 
-const DATES = {
-  BETA_START: new Date('2026-02-15T00:00:00Z').getTime(),
-  BETA_END: new Date('2026-02-17T00:00:00Z').getTime(),
-  FINAL_LAUNCH: new Date('2026-03-15T00:00:00Z').getTime()
-};
-
 export default function App() {
   const [isActive, setIsActive] = useState(false);
   const [battery, setBattery] = useState(100);
@@ -67,11 +61,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const now = Date.now();
-  const isBetaWindow = now >= DATES.BETA_START && now <= DATES.BETA_END;
-  const isHardLockdown = now > DATES.BETA_END && now < DATES.FINAL_LAUNCH;
-  const isLive = now >= DATES.FINAL_LAUNCH;
-
   useEffect(() => {
     let interval: any;
     if (isActive && battery > 0) {
@@ -88,10 +77,6 @@ export default function App() {
   }, [isActive, battery, isCooling]);
 
   const handleAction = (name: string) => {
-    if (isHardLockdown && name !== 'ABOUT') {
-      setActiveTab('LOCKDOWN');
-      return;
-    }
     setActiveTab(name);
   };
 
@@ -167,16 +152,6 @@ export default function App() {
         <PanelWrapper active={activeTab === 'CONNECT'} onClose={() => setActiveTab('NONE')}><ConnectPanel /></PanelWrapper>
         <PanelWrapper active={activeTab === 'EXPLORE'} onClose={() => setActiveTab('NONE')}><ExplorePanel /></PanelWrapper>
         <PanelWrapper active={activeTab === 'SEARCH'} onClose={() => setActiveTab('NONE')}><SearchPanel /></PanelWrapper>
-
-        {activeTab === 'LOCKDOWN' && (
-          <div className="absolute inset-0 flex items-center justify-center z-[100] pointer-events-none">
-             <div className="bg-black/90 backdrop-blur-2xl p-10 border border-red-500 rounded-xl text-center pointer-events-auto">
-                <h2 className="text-red-500 font-mono font-bold tracking-[0.4em] mb-4 uppercase">System Blackout</h2>
-                <p className="text-gray-400 font-mono text-xs uppercase tracking-widest leading-loose">Institutional Access Restricted. Resuming: March 15</p>
-                <button onClick={() => setActiveTab('NONE')} className="mt-8 px-6 py-2 border border-cyan-900 text-cyan-500 text-[10px] uppercase">Acknowledge</button>
-             </div>
-          </div>
-        )}
       </div>
     </div>
   );

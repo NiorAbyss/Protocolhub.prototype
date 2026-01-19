@@ -16,27 +16,9 @@ export default function ConnectPanel() {
             No Wallet Connected
           </span>
           
-          {/* UPDATED: Generic Wallet button as requested */}
           <button className="w-full py-3 border border-cyan-500 bg-cyan-500/5 hover:bg-cyan-500/20 text-xs font-bold uppercase tracking-[0.2em] transition-all">
             Connect Wallet
           </button>
-        </div>
-      </section>
-
-      {/* SUBSCRIPTION TIMER SECTION */}
-      <section>
-        <h2 className="text-lg font-bold tracking-[0.3em] uppercase border-b border-cyan-900 pb-2 mb-4">
-          Access Credentials
-        </h2>
-        <div className="space-y-4 px-2">
-          <div className="flex justify-between items-center text-xs">
-            <span className="opacity-50 uppercase tracking-wider">Status:</span>
-            <span className="text-red-500 font-bold uppercase tracking-widest animate-pulse">Inactive</span>
-          </div>
-          <div className="flex justify-between items-center text-xs">
-            <span className="opacity-50 uppercase tracking-wider">Days Remaining:</span>
-            <span className="text-white font-bold">0 DAYS</span>
-          </div>
         </div>
       </section>
 
