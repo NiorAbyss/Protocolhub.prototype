@@ -1,0 +1,64 @@
+// server/routes/metadata.ts
+// GET /api/nft/metadata/:id
+// Returns Metaplex-compatible metadata JSON for each NFT mint.
+// The $ID$ in your Candy Machine config gets replaced with the actual mint number.
+
+import { Router, Request, Response } from 'express';
+
+const router = Router();
+
+const IMAGE_URL = 'https://purple-petite-rooster-763.mypinata.cloud/ipfs/bafybeidb4z3iootvdvys35ls5s72qma6xvakraz3sam2apnoteg3vbrjwy';
+const EXTERNAL_URL = 'https://protocolhub.io';
+
+router.get('/:id', (req: Request, res: Response) => {
+  const id = req.params.id;
+
+  // This is the complete Metaplex-compatible metadata structure.
+  // The two fields that were missing and causing the image not to show:
+  //   1. "symbol"              — required by Metaplex standard
+  //   2. "properties.files"   — required by wallets + explorers to render image
+  //   3. "seller_fee_basis_points" — your 6% royalty in basis points (600 = 6%)
+  const metadata = {
+    name:        `ProtocolHub Genesis (PGEN) #${id}`,
+    symbol:      'PGEN',
+    description: 'ProtocolHub Genesis — Pioneer access pass to ProtocolHub: The Vast Network. Grants early supporter privileges and full platform access.',
+    image:       IMAGE_URL,
+    external_url: EXTERNAL_URL,
+    seller_fee_basis_points: 600, // 6% royalty — matches your on-chain setting
+
+    attributes: [
+      { trait_type: 'Tier',    value: 'Bronze'             },
+      { trait_type: 'Type',    value: 'Genesis Access Pass' },
+      { trait_type: 'Access',  value: 'Full Platform'       },
+      { trait_type: 'Series',  value: 'Pioneer'             },
+      { trait_type: 'Utility', value: 'Platform Membership' },
+      { trait_type: 'Edition', value: `#${id}`              },
+    ],
+
+    // ↓ This is what was missing — wallets and explorers use "properties.files"
+    // to locate and display the image. Without it Solscan shows the placeholder.
+    properties: {
+      category: 'image',
+      files: [
+        {
+          uri:  IMAGE_URL,
+          type: 'image/png',
+        },
+      ],
+      creators: [
+        {
+          // Replace with your actual creator wallet address
+          address: process.env.AUTHORITY_WALLET || '',
+          share:   100,
+        },
+      ],
+    },
+  };
+
+  // Set correct content-type and CORS headers so wallets can fetch this freely
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json(metadata);
+});
+
+export default router;
