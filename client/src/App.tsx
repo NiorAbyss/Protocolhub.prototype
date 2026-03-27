@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, CSSProperties, Component, ReactNode } from 'react';
+import { useState, useEffect, useRef, CSSProperties } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import PanelWrapper from './components/shared/PanelWrapper';
 import AboutPanel from './components/hud/AboutPanel';
@@ -11,44 +11,10 @@ import AdminDashboard from './pages/AdminDashboard.jsx';
 import PremiumAura from './components/hud/PremiumAura';
 import { trackPanel } from './lib/useAnalytics';
 
-// ─── ERROR BOUNDARY ───────────────────────────────────────────────────────────
-class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
-  constructor(props: any) {
-    super(props);
-    this.state = { error: null };
-  }
-  static getDerivedStateFromError(err: any) {
-    return { error: err?.message || String(err) };
-  }
-  componentDidCatch(err: any, info: any) {
-    console.error('[ProtocolHub crash]', err, info?.componentStack);
-  }
-  render() {
-    if (this.state.error) {
-      return (
-        <div style={{
-          background: '#000', color: '#ff3355', fontFamily: 'IBM Plex Mono, monospace',
-          padding: 32, minHeight: '100vh', fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word'
-        }}>
-          <div style={{ color: '#00b4ff', fontSize: 16, marginBottom: 16, letterSpacing: 2 }}>
-            ◈ PROTOCOLHUB — RENDER ERROR
-          </div>
-          <div style={{ color: '#ff3355', marginBottom: 12 }}>ERROR: {this.state.error}</div>
-          <div style={{ color: '#555', fontSize: 11 }}>Check the browser console for full stack trace.</div>
-          <button
-            onClick={() => this.setState({ error: null })}
-            style={{ marginTop: 24, background: '#00b4ff', color: '#000', border: 'none', padding: '8px 20px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 700, cursor: 'pointer' }}
-          >
-            RETRY
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-/* ─── GATED PANEL LIST ───────────────────────────────────────────────────────*/
+/* ─── GATED PANEL LIST ───────────────────────────────────────────────────────
+   These panels require a valid NFT when the gate is live.
+   ABOUT + CONNECT are never gated — always accessible.
+──────────────────────────────────────────────────────────────────────────── */
 const GATED: Record<string, boolean> = {
   NETWORK:  true,
   PROTOCOL: true,
@@ -89,14 +55,6 @@ function GateToast({ msg, onClose }: { msg: string; onClose: () => void }) {
   );
 }
 
-// ─── STARS — memoised so they don't re-randomise on every render ──────────────
-const STARS = Array.from({ length: 25 }, (_, i) => ({
-  id: i,
-  top:      Math.random() * 100,
-  left:     Math.random() * 100,
-  duration: 2 + Math.random() * 3,
-}));
-
 // ─── MAIN HUD ─────────────────────────────────────────────────────────────────
 function HUD() {
   const [isActive, setIsActive]     = useState(false);
@@ -105,9 +63,11 @@ function HUD() {
   const [activeTab, setActiveTab]   = useState('NONE');
   const [gateMsg,   setGateMsg]     = useState<string | null>(null);
 
+  // Cache gate + access so we don't hit the API on every click
   const gateCache   = useRef<{ live: boolean; checkedAt: number } | null>(null);
   const accessCache = useRef<{ wallet: string; hasAccess: boolean; checkedAt: number } | null>(null);
 
+  // Feature flags — loaded once, cached in state
   const [features, setFeatures] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -119,22 +79,19 @@ function HUD() {
       } catch {}
     };
     loadFlags();
+    // Refresh flags every 60s so unlocks appear without reload
     const t = setInterval(loadFlags, 60_000);
     return () => clearInterval(t);
   }, []);
 
   const [selectedTokens, setSelectedTokens] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ph_tokens');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
+    const saved = localStorage.getItem('ph_tokens');
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [subscriptionExpiry, setSubscriptionExpiry] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ph_expiry');
-      return saved ? parseInt(saved) : 0;
-    } catch { return 0; }
+    const saved = localStorage.getItem('ph_expiry');
+    return saved ? parseInt(saved) : 0;
   });
 
   useEffect(() => {
@@ -142,10 +99,8 @@ function HUD() {
   }, [activeTab]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('ph_tokens', JSON.stringify(selectedTokens));
-      localStorage.setItem('ph_expiry', subscriptionExpiry.toString());
-    } catch {}
+    localStorage.setItem('ph_tokens', JSON.stringify(selectedTokens));
+    localStorage.setItem('ph_expiry', subscriptionExpiry.toString());
   }, [selectedTokens, subscriptionExpiry]);
 
   const [liveStats, setLiveStats] = useState<any>(null);
@@ -177,14 +132,17 @@ function HUD() {
     return () => clearInterval(interval);
   }, [isActive, battery, isCooling]);
 
+  /* ── Gate check — runs before opening any gated panel ─────────────────── */
   const handleAction = async (name: string) => {
     if (!GATED[name]) {
+      // ABOUT, CONNECT — always open immediately
       setActiveTab(name);
       trackPanel(name.toLowerCase());
       return;
     }
 
     try {
+      // 1. Check if gate is live (cache 30s)
       const now = Date.now();
       let gateLive = false;
 
@@ -197,11 +155,13 @@ function HUD() {
         gateCache.current = { live: gateLive, checkedAt: now };
       }
 
+      // Gate is off — open panel freely
       if (!gateLive) {
         setActiveTab(name);
         return;
       }
 
+      // 2. Gate is on — check wallet
       const wallet = getConnectedWallet();
       if (!wallet) {
         setGateMsg('Connect your wallet in the CONNECT panel to access this.');
@@ -209,7 +169,9 @@ function HUD() {
         return;
       }
 
+      // 3. Check NFT access (cache 60s per wallet)
       let hasAccess = false;
+
       if (
         accessCache.current &&
         accessCache.current.wallet === wallet &&
@@ -224,19 +186,22 @@ function HUD() {
       }
 
       if (!hasAccess) {
-        setGateMsg('You need a Protocol Genesis NFT to access this panel.');
+        setGateMsg('You need a ProtocolHub NFT to access this panel.');
         setActiveTab('CONNECT');
         return;
       }
 
+      // All checks passed — open the panel
       setActiveTab(name);
       trackPanel(name.toLowerCase());
 
     } catch {
+      // On network error fail open — don't lock out users
       setActiveTab(name);
     }
   };
 
+  // Invalidate access cache when wallet connects/disconnects
   useEffect(() => {
     const reset = () => { accessCache.current = null; gateCache.current = null; };
     window.addEventListener('wallet-connected',    reset);
@@ -247,21 +212,39 @@ function HUD() {
     };
   }, []);
 
+  // Background gate polling — instant lockout when owner turns gate on
   useEffect(() => {
     const poll = async () => {
       try {
         const r = await fetch('/api/gate/status');
         const d = await r.json();
         const gateLive = !!d.gateLive;
+
+        // Update cache
         gateCache.current = { live: gateLive, checkedAt: Date.now() };
-        if (!gateLive) return;
+
+        if (!gateLive) return; // Gate off — nothing to check
+
+        // Gate is on — verify current user still has access
         const wallet = getConnectedWallet();
-        if (!wallet) { setActiveTab('NONE'); return; }
+        if (!wallet) {
+          // No wallet — kick to connect
+          setActiveTab('NONE');
+          return;
+        }
+
+        // Check NFT access
         const r2 = await fetch(`/api/nft/check/${wallet}`);
         const d2  = await r2.json();
-        if (!d2.hasAccess) { setActiveTab('NONE'); accessCache.current = null; }
+        if (!d2.hasAccess) {
+          // Lost access — close panel immediately
+          setActiveTab('NONE');
+          accessCache.current = null;
+        }
       } catch {}
     };
+
+    // Poll every 30 seconds
     const t = setInterval(poll, 30_000);
     return () => clearInterval(t);
   }, []);
@@ -292,8 +275,8 @@ function HUD() {
         .nav-btn:active, .search-btn:active { transform: scale(0.98); background: rgba(0, 242, 255, 0.1); }
       `}</style>
 
-      {STARS.map(s => (
-        <div key={s.id} className="star" style={{ top: s.top + '%', left: s.left + '%', animation: `twinkle ${s.duration}s infinite` }} />
+      {[...Array(25)].map((_, i) => (
+        <div key={i} className="star" style={{ top: Math.random() * 100 + '%', left: Math.random() * 100 + '%', animation: `twinkle ${2 + Math.random() * 3}s infinite` }} />
       ))}
 
       <div style={{ position: 'relative', width: '100%', height: 'auto', aspectRatio: '16 / 9', maxWidth: '100vw', maxHeight: '100vh', zIndex: 10 }}>
@@ -327,6 +310,7 @@ function HUD() {
           style={{ position: 'absolute', bottom: '6.4%', left: '50%', transform: 'translateX(-50%)', width: '12%', height: '5%', background: 'transparent', border: 'none', zIndex: 60, cursor: 'pointer' }}
         />
 
+        {/* ── Panels ── */}
         <PanelWrapper active={activeTab === 'NETWORK'}  onClose={() => setActiveTab('NONE')}>
           <NetworkPanel selectedTokens={selectedTokens} toggleToken={toggleToken} features={features} />
         </PanelWrapper>
@@ -337,6 +321,7 @@ function HUD() {
         <PanelWrapper active={activeTab === 'SEARCH'}   onClose={() => setActiveTab('NONE')}><SearchPanel /></PanelWrapper>
       </div>
 
+      {/* ── Gate toast ── */}
       {gateMsg && <GateToast msg={gateMsg} onClose={() => setGateMsg(null)} />}
     </div>
   );
@@ -345,13 +330,11 @@ function HUD() {
 // ─── ROOT WITH ROUTER ─────────────────────────────────────────────────────────
 export default function App() {
   return (
-    <ErrorBoundary>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/*"     element={<HUD />} />
-        </Routes>
-      </BrowserRouter>
-    </ErrorBoundary>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/*"     element={<HUD />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
