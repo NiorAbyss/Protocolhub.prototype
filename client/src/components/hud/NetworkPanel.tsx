@@ -317,7 +317,7 @@ export default function NetworkPanel({ onClose, features = {} }: { onClose?: () 
         {tab === 'capitalflow' && (
           features['capital_flow'] === 'unlocked'
             ? <CapitalFlowTab />
-            : <div style={{ position: 'relative', height: '100%', minHeight: 400 }}>
+            : <div style={{ position: 'relative', flex: 1, minHeight: 300 }}>
                 <ComingSoon featureName="CAPITAL FLOW & ROTATION" description="Sector rotation, smart money destinations, bridge inflows, whale concentration" panel="Network" />
               </div>
         )}

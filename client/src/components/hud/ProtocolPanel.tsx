@@ -534,6 +534,7 @@ function TransactionsTab() {
                 </div>
                 {/* Amount + status */}
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  {/* Primary amount — show SOL moved or token amount */}
                   {tx.totalSolMoved > 0.001 ? (
                     <div style={{ fontSize: 10, fontWeight: 700, color: C.solPurple }}>
                       {tx.totalSolMoved >= 1000 ? fmtBig(tx.totalSolMoved) : tx.totalSolMoved.toFixed(3)} SOL
@@ -554,11 +555,13 @@ function TransactionsTab() {
               {/* ── Expanded details ── */}
               {isOpen && (
                 <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(0,0,0,0.3)', borderRadius: 4, animation: 'feedSlide 0.15s ease' }}>
+                  {/* Signature */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span style={{ fontSize: 7, color: C.dim, letterSpacing: 2 }}>SIGNATURE</span>
                     <span style={{ fontSize: 8, color: C.silver }}>{truncate(tx.signature, 20)}</span>
                     <CopyBtn text={tx.signature} />
                   </div>
+                  {/* Token transfers */}
                   {tx.tokenTransfers.length > 0 && (
                     <div style={{ marginBottom: 6 }}>
                       <div style={{ fontSize: 7, color: C.dim, letterSpacing: 2, marginBottom: 4 }}>TOKEN TRANSFERS</div>
@@ -570,6 +573,7 @@ function TransactionsTab() {
                       ))}
                     </div>
                   )}
+                  {/* Native SOL transfers */}
                   {tx.nativeTransfers.length > 0 && (
                     <div>
                       <div style={{ fontSize: 7, color: C.dim, letterSpacing: 2, marginBottom: 4 }}>SOL TRANSFERS</div>
@@ -624,6 +628,7 @@ function LiveFeedTab() {
   const [count,          setCount]          = useState(0);
   const [whaleThreshold, setWhaleThreshold] = useState(100_000);
 
+  // Bronze: $100K, $150K. Silver: $250K. Gold: $500K, $1M
   const WHALE_TIERS = [
     { label: '$100K+', value: 100_000, minTier: 'bronze' as const },
     { label: '$150K+', value: 150_000, minTier: 'bronze' as const },
@@ -634,14 +639,15 @@ function LiveFeedTab() {
   const USER_TIER: 'bronze' | 'silver' | 'gold' = 'bronze';
   const TIER_ORDER_FEED = { bronze: 0, silver: 1, gold: 2 };
   const tierOk = (t: typeof WHALE_TIERS[0]) => TIER_ORDER_FEED[USER_TIER] >= TIER_ORDER_FEED[t.minTier];
-  const bufferRef = useRef<LiveEvent[]>([]);
-  const esRef     = useRef<EventSource | null>(null);
+  const bufferRef    = useRef<LiveEvent[]>([]);
+  const esRef        = useRef<EventSource | null>(null);
 
   useEffect(() => {
     let retries = 0;
     let retryTimer: any = null;
 
     const connect = () => {
+      // Clean up any existing connection first
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -653,7 +659,7 @@ function LiveFeedTab() {
 
       es.onopen = () => {
         setStatus('connected');
-        retries = 0;
+        retries = 0; // reset on successful connect
       };
 
       es.onmessage = (e) => {
@@ -687,6 +693,7 @@ function LiveFeedTab() {
         setStatus('disconnected');
         es.close();
         esRef.current = null;
+        // Exponential backoff: 3s, 6s, 12s, max 30s
         const delay = Math.min(3000 * Math.pow(2, retries), 30_000);
         retries++;
         retryTimer = setTimeout(connect, delay);
@@ -709,14 +716,11 @@ function LiveFeedTab() {
   }, [paused]);
 
   const FILTERS: FeedFilter[] = ['ALL', 'SWAPS', 'TRANSFERS', 'WHALE'];
-
-  // ── FIX: WHALE filter only hides enriched events below threshold,
-  //         not events still waiting on enrichment (amountUsd === undefined)
   const filtered = feed.filter(e => {
     if (filter === 'ALL')       return true;
     if (filter === 'SWAPS')     return e.type === 'SWAP';
     if (filter === 'TRANSFERS') return e.type === 'TRANSFER';
-    if (filter === 'WHALE')     return e.amountUsd != null && e.amountUsd >= whaleThreshold;
+    if (filter === 'WHALE')     return (e.amountUsd ?? 0) >= whaleThreshold;
     return true;
   });
 
@@ -807,9 +811,9 @@ function LiveFeedTab() {
         )}
 
         {filtered.map((e, i) => {
-          const color   = eventColor(e.type);
-          const isWhale = (e.amountUsd ?? 0) >= whaleThreshold;
-          const solAmt  = e.amountSol ?? (e.amountUsd && e.amountUsd > 0 ? e.amountUsd / 185 : null);
+          const color      = eventColor(e.type);
+          const isWhale    = (e.amountUsd ?? 0) >= whaleThreshold;
+          const solAmt     = e.amountSol ?? (e.amountUsd && e.amountUsd > 0 ? e.amountUsd / 185 : null); // rough SOL estimate if not explicit
           return (
             <div key={e.id}
               style={{ display: 'grid', gridTemplateColumns: '44px 60px 64px 90px 80px 70px auto', gap: 6, padding: '6px 6px', borderBottom: `1px solid ${isWhale ? `${C.orange}22` : 'rgba(255,255,255,0.03)'}`, animation: i === 0 ? 'feedSlide 0.2s ease' : 'none', minWidth: 480, background: isWhale ? `${C.orange}05` : 'transparent', alignItems: 'center' }}>
@@ -977,6 +981,8 @@ function WhaleTrackerTab() {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PRE-RUG PATTERN SCORE
+   Pure computation on existing audit data — zero extra API calls.
+   Checks for known rug patterns and produces a 0-100 probability score.
    ═══════════════════════════════════════════════════════════════════════════ */
 interface RugPattern { label: string; triggered: boolean; weight: number; description: string; }
 
@@ -987,15 +993,60 @@ function computeRugPatterns(result: AuditResult): { score: number; level: string
   const getFlag = (label: string) => flags.find(f => f.label === label);
 
   const patterns: RugPattern[] = [
-    { label: 'Liquidity Unlocked',      triggered: getFlag('Liquidity Locked')?.value === false,                                                         weight: 25, description: 'Dev can drain liquidity at any time — classic rug vector' },
-    { label: 'Hidden Sell Tax',         triggered: sim?.hiddenFeeDetected === true || parseFloat(meta.sellTax) > 15,                                      weight: 22, description: 'Sell simulation detected hidden fees or sell tax > 15%' },
-    { label: 'Mintable Supply',         triggered: getFlag('Mint Function')?.value === true,                                                              weight: 18, description: 'Dev can print unlimited tokens and dump on holders' },
-    { label: 'Ownership Not Renounced', triggered: getFlag('Can Take Back Owner')?.value === true || getFlag('Hidden Owner')?.value === true,             weight: 16, description: 'Owner can change contract rules or blacklist wallets' },
-    { label: 'Top Holder Concentration',triggered: parseFloat(meta.holderCount || '0') > 0 && result.riskScore > 40,                                     weight: 12, description: 'Small number of wallets control enough supply to crash price' },
-    { label: 'Proxy / Upgradeable',     triggered: getFlag('Proxy Contract')?.value === true,                                                             weight: 10, description: 'Contract logic can be swapped after launch' },
-    { label: 'Sell Simulation Reverted',triggered: sim?.reverted === true,                                                                                weight: 30, description: 'Cannot sell token — honeypot confirmed by simulation' },
-    { label: 'External Call Risk',      triggered: getFlag('External Call Risk')?.value === true,                                                         weight:  8, description: 'Contract calls external addresses — potential backdoor' },
-    { label: 'Self-Destruct Capable',   triggered: getFlag('Self-Destruct')?.value === true,                                                              weight: 20, description: 'Dev can destroy the contract and all liquidity' },
+    {
+      label:       'Liquidity Unlocked',
+      triggered:   getFlag('Liquidity Locked')?.value === false,
+      weight:      25,
+      description: 'Dev can drain liquidity at any time — classic rug vector',
+    },
+    {
+      label:       'Hidden Sell Tax',
+      triggered:   sim?.hiddenFeeDetected === true || parseFloat(meta.sellTax) > 15,
+      weight:      22,
+      description: 'Sell simulation detected hidden fees or sell tax > 15%',
+    },
+    {
+      label:       'Mintable Supply',
+      triggered:   getFlag('Mint Function')?.value === true,
+      weight:      18,
+      description: 'Dev can print unlimited tokens and dump on holders',
+    },
+    {
+      label:       'Ownership Not Renounced',
+      triggered:   getFlag('Can Take Back Owner')?.value === true || getFlag('Hidden Owner')?.value === true,
+      weight:      16,
+      description: 'Owner can change contract rules or blacklist wallets',
+    },
+    {
+      label:       'Top Holder Concentration',
+      triggered:   parseFloat(meta.holderCount || '0') > 0 && result.riskScore > 40,
+      weight:      12,
+      description: 'Small number of wallets control enough supply to crash price',
+    },
+    {
+      label:       'Proxy / Upgradeable',
+      triggered:   getFlag('Proxy Contract')?.value === true,
+      weight:      10,
+      description: 'Contract logic can be swapped after launch',
+    },
+    {
+      label:       'Sell Simulation Reverted',
+      triggered:   sim?.reverted === true,
+      weight:      30,
+      description: 'Cannot sell token — honeypot confirmed by simulation',
+    },
+    {
+      label:       'External Call Risk',
+      triggered:   getFlag('External Call Risk')?.value === true,
+      weight:      8,
+      description: 'Contract calls external addresses — potential backdoor',
+    },
+    {
+      label:       'Self-Destruct Capable',
+      triggered:   getFlag('Self-Destruct')?.value === true,
+      weight:      20,
+      description: 'Dev can destroy the contract and all liquidity',
+    },
   ];
 
   const triggered = patterns.filter(p => p.triggered);
@@ -1015,6 +1066,7 @@ function PreRugScore({ result }: { result: AuditResult }) {
 
   return (
     <div style={{ marginTop: 14, border: `1px solid ${color}22`, borderRadius: 6, overflow: 'hidden' }}>
+      {/* Header */}
       <div onClick={() => setOpen(o => !o)}
         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer', background: `${color}08` }}>
         <div>
@@ -1025,12 +1077,14 @@ function PreRugScore({ result }: { result: AuditResult }) {
             <span style={{ fontSize: 8, color: C.dim }}>{triggered.length}/{patterns.length} patterns triggered</span>
           </div>
         </div>
+        {/* Score bar */}
         <div style={{ flex: 1, height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2, overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${score}%`, background: `linear-gradient(90deg,${color}88,${color})`, borderRadius: 2, transition: 'width 0.8s ease', boxShadow: `0 0 8px ${color}44` }} />
         </div>
         <span style={{ fontSize: 9, color: open ? C.cyan : C.dim, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
       </div>
 
+      {/* Expanded pattern list */}
       {open && (
         <div style={{ padding: '8px 12px', borderTop: `1px solid ${color}22`, animation: 'feedSlide 0.15s ease' }}>
           {triggered.length > 0 && (
@@ -1070,6 +1124,8 @@ function PreRugScore({ result }: { result: AuditResult }) {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TOKEN GENEALOGY
+   Shows deployer's full token deployment history — lets users judge
+   developer track record. Fetched once per deployer, cached 5 min.
    ═══════════════════════════════════════════════════════════════════════════ */
 interface GenealogyToken {
   address: string; name: string; symbol: string;
@@ -1124,12 +1180,14 @@ function TokenGenealogy({ deployer }: { deployer: string }) {
 
       {loaded && data.length > 0 && (
         <div style={{ padding: '8px 12px' }}>
+          {/* Summary */}
           <div style={{ display: 'flex', gap: 16, marginBottom: 10, padding: '6px 0', borderBottom: `1px solid ${C.border}` }}>
             <div><div style={{ fontSize: 7, color: C.dim, letterSpacing: 2 }}>TOTAL</div><div style={{ fontSize: 14, color: C.cyan }}>{data.length}</div></div>
             <div><div style={{ fontSize: 7, color: C.dim, letterSpacing: 2 }}>ACTIVE</div><div style={{ fontSize: 14, color: C.green }}>{activeCount}</div></div>
             <div><div style={{ fontSize: 7, color: C.dim, letterSpacing: 2 }}>RUGGED</div><div style={{ fontSize: 14, color: rugCount > 0 ? C.red : C.dim }}>{rugCount}</div></div>
             {rugCount > 0 && <Pill label={`⚠ SERIAL RUGGER — ${rugCount} rug${rugCount > 1 ? 's' : ''}`} color={C.red} />}
           </div>
+          {/* Token list */}
           {data.map((t, i) => (
             <div key={t.address} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', borderBottom: `1px solid rgba(255,255,255,0.03)`, animation: `rowPop 0.2s ease ${i * 0.03}s both` }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -1152,6 +1210,8 @@ function TokenGenealogy({ deployer }: { deployer: string }) {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TAB 5 — WALLET INTELLIGENCE
+   Helius tx history → PnL, win rate, avg hold time, wallet classification.
+   One Helius call per unique wallet, cached 60s server-side.
    ═══════════════════════════════════════════════════════════════════════════ */
 type WalletClass = 'SMART MONEY' | 'WHALE' | 'BOT' | 'INSIDER' | 'RETAIL';
 
@@ -1166,7 +1226,7 @@ interface WalletProfile {
   bestTrade:       { token: string; pnl: number } | null;
   worstTrade:      { token: string; pnl: number } | null;
   topDexes:        string[];
-  activityBurst:   number;
+  activityBurst:   number;  // txns per day average
   firstSeen:       number;
   lastSeen:        number;
 }
@@ -1189,16 +1249,25 @@ const CLASS_DESC: Record<WalletClass, string> = {
 
 function classifyWallet(txs: any[]): { classification: WalletClass; score: number } {
   if (!txs.length) return { classification: 'RETAIL', score: 0 };
+
   const swaps     = txs.filter(t => t.type === 'SWAP');
   const totalTxs  = txs.length;
   const timeSpan  = txs.length > 1 ? (txs[0].timestamp - txs[txs.length - 1].timestamp) : 86400;
   const txPerDay  = totalTxs / Math.max(1, timeSpan / 86400);
   const avgNative = txs.reduce((s, t) => s + (t.nativeTransfers?.[0]?.amount ?? 0), 0) / totalTxs / 1e9;
+
   if (txPerDay > 50)    return { classification: 'BOT',         score: Math.min(100, txPerDay) };
   if (avgNative > 500)  return { classification: 'WHALE',       score: Math.min(100, avgNative / 10) };
-  const nftMints = txs.filter(t => t.type === 'NFT_MINT').length;
-  if (nftMints > 5 && swaps.length > 10 && txPerDay > 5) return { classification: 'INSIDER', score: 75 };
-  if (swaps.length > 15 && txPerDay < 10 && avgNative > 5) return { classification: 'SMART MONEY', score: 80 };
+
+  // Insider heuristic: many NFT_MINT + SWAP combos in tight windows
+  const nftMints  = txs.filter(t => t.type === 'NFT_MINT').length;
+  if (nftMints > 5 && swaps.length > 10 && txPerDay > 5)
+    return { classification: 'INSIDER', score: 75 };
+
+  // Smart money: consistent small-medium swaps, spread across days
+  if (swaps.length > 15 && txPerDay < 10 && avgNative > 5)
+    return { classification: 'SMART MONEY', score: 80 };
+
   return { classification: 'RETAIL', score: 40 };
 }
 
@@ -1223,16 +1292,19 @@ function WalletIntelTab() {
   }, [wallet]);
 
   const fmtMs = (ms: number) => {
-    if (ms < 60_000)     return `${Math.round(ms / 1000)}s`;
-    if (ms < 3_600_000)  return `${Math.round(ms / 60_000)}m`;
-    if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h`;
+    if (ms < 60_000)      return `${Math.round(ms / 1000)}s`;
+    if (ms < 3_600_000)   return `${Math.round(ms / 60_000)}m`;
+    if (ms < 86_400_000)  return `${Math.round(ms / 3_600_000)}h`;
     return `${Math.round(ms / 86_400_000)}d`;
   };
+
   const fmtDate = (ts: number) => ts ? new Date(ts * 1000).toLocaleDateString() : '—';
 
   return (
     <ScrollArea>
       <div style={{ padding: '12px 4px', fontFamily: FM }}>
+
+        {/* ── Input ── */}
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, marginBottom: 6 }}>SOLANA WALLET ADDRESS</div>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -1254,9 +1326,13 @@ function WalletIntelTab() {
 
         {profile && !loading && (
           <div style={{ animation: 'rowPop 0.3s ease' }}>
+
+            {/* ── Classification badge ── */}
             <div style={{ marginBottom: 14, padding: '12px 14px', border: `1px solid ${CLASS_COLOR[profile.classification]}33`, borderRadius: 6, background: `${CLASS_COLOR[profile.classification]}08` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                <div style={{ fontSize: 22, fontFamily: FH, letterSpacing: 3, color: CLASS_COLOR[profile.classification] }}>{profile.classification}</div>
+                <div style={{ fontSize: 22, fontFamily: FH, letterSpacing: 3, color: CLASS_COLOR[profile.classification] }}>
+                  {profile.classification}
+                </div>
                 <div style={{ flex: 1, height: 3, background: 'rgba(255,255,255,0.05)', borderRadius: 2, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${profile.classScore}%`, background: CLASS_COLOR[profile.classification], borderRadius: 2, transition: 'width 0.8s ease' }} />
                 </div>
@@ -1269,14 +1345,15 @@ function WalletIntelTab() {
               </div>
             </div>
 
+            {/* ── Key metrics grid ── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
               {[
                 { label: 'REALISED PnL',  value: `${profile.realisedPnl >= 0 ? '+' : ''}$${fmtBig(Math.abs(profile.realisedPnl))}`, color: profile.realisedPnl >= 0 ? C.green : C.red },
-                { label: 'WIN RATE',      value: `${profile.winRate.toFixed(1)}%`,     color: profile.winRate > 55 ? C.green : profile.winRate > 45 ? C.yellow : C.red },
-                { label: 'TOTAL TRADES',  value: profile.totalTrades.toString(),        color: C.cyan },
-                { label: 'AVG HOLD TIME', value: fmtMs(profile.avgHoldMs),              color: C.silver },
-                { label: 'FIRST SEEN',    value: fmtDate(profile.firstSeen),             color: C.dim },
-                { label: 'LAST SEEN',     value: fmtDate(profile.lastSeen),              color: C.dim },
+                { label: 'WIN RATE',      value: `${profile.winRate.toFixed(1)}%`,      color: profile.winRate > 55 ? C.green : profile.winRate > 45 ? C.yellow : C.red },
+                { label: 'TOTAL TRADES',  value: profile.totalTrades.toString(),         color: C.cyan },
+                { label: 'AVG HOLD TIME', value: fmtMs(profile.avgHoldMs),               color: C.silver },
+                { label: 'FIRST SEEN',    value: fmtDate(profile.firstSeen),              color: C.dim },
+                { label: 'LAST SEEN',     value: fmtDate(profile.lastSeen),               color: C.dim },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ padding: '8px 10px', border: `1px solid ${C.border}`, borderRadius: 4, background: 'rgba(0,0,0,0.2)' }}>
                   <div style={{ fontSize: 7, color: C.dim, letterSpacing: 2, marginBottom: 3 }}>{label}</div>
@@ -1285,6 +1362,7 @@ function WalletIntelTab() {
               ))}
             </div>
 
+            {/* ── Best / worst trade ── */}
             {(profile.bestTrade || profile.worstTrade) && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
                 {profile.bestTrade && (
@@ -1304,6 +1382,7 @@ function WalletIntelTab() {
               </div>
             )}
 
+            {/* ── Top DEXes ── */}
             {profile.topDexes.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 7, letterSpacing: 2, color: C.dim, marginBottom: 6 }}>PREFERRED DEXES</div>
@@ -1315,6 +1394,7 @@ function WalletIntelTab() {
               </div>
             )}
 
+            {/* ── Recent tx mini-feed ── */}
             {txs.length > 0 && (
               <div>
                 <div style={{ fontSize: 7, letterSpacing: 2, color: C.dim, marginBottom: 6 }}>RECENT ACTIVITY</div>
@@ -1343,8 +1423,11 @@ function WalletIntelTab() {
   );
 }
 
+
 /* ═══════════════════════════════════════════════════════════════════════════
    TAB 6 — MARKET HYPE
+   CoinGecko trending + top movers + DexScreener boosted
+   Composite hype score → ranked top 10 coins · 5 min cache
    ═══════════════════════════════════════════════════════════════════════════ */
 interface HypeCoin {
   id: string; name: string; symbol: string; thumb: string;
@@ -1409,6 +1492,8 @@ function MarketHypeTab() {
   return (
     <ScrollArea>
       <div style={{ padding: '12px 4px', fontFamily: FM }}>
+
+        {/* ── Header ── */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div>
             <div style={{ fontFamily: FH, fontSize: 14, letterSpacing: 3, color: C.cyan }}>MARKET HYPE</div>
@@ -1420,6 +1505,7 @@ function MarketHypeTab() {
           </div>
         </div>
 
+        {/* ── Summary pills ── */}
         {coins.length > 0 && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
             {extremeCount > 0 && <Pill label={`🔥 ${extremeCount} EXTREME HYPE`} color={C.red}    />}
@@ -1431,6 +1517,7 @@ function MarketHypeTab() {
         {loading && <Loader />}
         {error && <div style={{ fontSize: 9, color: C.red, padding: '8px 0' }}>{error}</div>}
 
+        {/* ── Coin cards ── */}
         {coins.map((coin, i) => {
           const isOpen  = expanded === coin.id;
           const hlColor = HYPE_LEVEL_COLOR[coin.hypeLevel];
@@ -1444,7 +1531,10 @@ function MarketHypeTab() {
                 background: isTop3 ? `${hlColor}06` : 'rgba(0,0,0,0.15)',
                 animation: `rowPop 0.2s ease ${i * 0.04}s both`, overflow: 'hidden' }}>
 
+              {/* ── Main row ── */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px' }}>
+
+                {/* Rank badge */}
                 <div style={{ width: 22, height: 22, borderRadius: 4, flexShrink: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   background: isTop3 ? `${hlColor}22` : 'rgba(255,255,255,0.04)',
@@ -1453,6 +1543,7 @@ function MarketHypeTab() {
                   {coin.hypeRank}
                 </div>
 
+                {/* Icon + name */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
                   {coin.thumb ? (
                     <img src={coin.thumb} alt="" width={20} height={20}
@@ -1473,13 +1564,16 @@ function MarketHypeTab() {
                   </div>
                 </div>
 
+                {/* Hype bar */}
                 <div style={{ flexShrink: 0 }}>
                   <div style={{ fontSize: 7, color: C.dim, letterSpacing: 1, marginBottom: 3 }}>HYPE</div>
                   <HypeBar score={coin.hypeScore} />
                 </div>
 
+                {/* Level pill */}
                 <Pill label={coin.hypeLevel} color={hlColor} />
 
+                {/* 24h change + price */}
                 <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 50 }}>
                   {coin.priceChange24h !== 0 && (
                     <div style={{ fontSize: 10, fontWeight: 700, color: coin.priceChange24h >= 0 ? C.green : C.red }}>
@@ -1496,6 +1590,7 @@ function MarketHypeTab() {
                 <span style={{ fontSize: 9, color: isOpen ? C.cyan : C.dim, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}>▾</span>
               </div>
 
+              {/* Source tags */}
               <div style={{ display: 'flex', gap: 4, paddingLeft: 52, paddingBottom: isOpen ? 0 : 8, flexWrap: 'wrap' }}>
                 {coin.sources.map((src, j) => (
                   <span key={j} style={{ fontSize: 7, letterSpacing: 1, fontWeight: 700,
@@ -1507,6 +1602,7 @@ function MarketHypeTab() {
                 ))}
               </div>
 
+              {/* Expanded detail */}
               {isOpen && (
                 <div style={{ padding: '8px 12px 12px', borderTop: `1px solid ${C.border}`, background: 'rgba(0,0,0,0.2)', animation: 'feedSlide 0.15s ease' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 8 }}>

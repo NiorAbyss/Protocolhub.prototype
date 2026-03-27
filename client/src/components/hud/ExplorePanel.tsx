@@ -1654,166 +1654,25 @@ export default function ExplorePanel({ features = {} }: { features?: Record<stri
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   HUB AI — Full Intelligence Digest
-   Twice daily: 09:00 UTC + 18:00 UTC · Owner manual generation
-   50pts / 24hr lock · Confluence scoring · Per-token · Anomaly alerts
+   HUB AI — Intelligence Briefs
+   Twice daily: 09:00 UTC + 18:00 UTC
+   50pts / 24hr lock · Feature flag: hub_ai
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const POSTURE_COLOR: Record<string, string> = {
-  'STRONGLY BULLISH':   '#00ff88',
-  'BULLISH':            '#00ff88',
-  'CAUTIOUSLY BULLISH': '#88ff44',
-  'CONSTRUCTIVE':       '#00b4ff',
-  'NEUTRAL':            '#ffdd00',
-  'CAUTIOUSLY BEARISH': '#ffaa00',
-  'BEARISH':            '#ff3355',
-  'RISK-OFF':           '#ff3355',
-};
-const POSTURE_BG: Record<string, string> = {
-  'STRONGLY BULLISH':   'rgba(0,255,136,0.06)',
-  'BULLISH':            'rgba(0,255,136,0.06)',
-  'CAUTIOUSLY BULLISH': 'rgba(136,255,68,0.05)',
-  'CONSTRUCTIVE':       'rgba(0,180,255,0.06)',
-  'NEUTRAL':            'rgba(255,221,0,0.05)',
-  'CAUTIOUSLY BEARISH': 'rgba(255,170,0,0.05)',
-  'BEARISH':            'rgba(255,51,85,0.06)',
-  'RISK-OFF':           'rgba(255,51,85,0.06)',
-};
-
-const TOKEN_ICONS: Record<string, string> = {
-  SOL: '◎', JUP: '⚡', BONK: '🐶', WIF: '🐕', JTO: '⚙',
-};
-
-function postureColor(p: string): string { return POSTURE_COLOR[p] ?? C.cyan; }
-function postureBg(p: string): string    { return POSTURE_BG[p]    ?? C.cyanFaint; }
-
-function ConfluenceBar({ score }: { score: number }) {
-  const col = score >= 70 ? C.green : score >= 50 ? C.yellow : C.red;
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontSize: 7, color: C.dim, letterSpacing: 2, fontFamily: FM }}>SIGNAL CONFLUENCE</span>
-        <span style={{ fontSize: 9, fontWeight: 700, color: col, fontFamily: FM }}>{score}/100</span>
-      </div>
-      <div style={{ height: 5, background: 'rgba(255,255,255,0.05)', borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${score}%`,
-          background: `linear-gradient(90deg,${col}66,${col})`,
-          borderRadius: 3, transition: 'width 1s ease',
-          boxShadow: `0 0 8px ${col}44` }} />
-      </div>
-      <div style={{ fontSize: 7, color: C.dim, marginTop: 3, fontFamily: FM }}>
-        {score >= 70 ? '✓ Strong alignment across signals'
-          : score >= 50 ? '⚡ Mixed signals — moderate conviction'
-          : '⚠ Conflicting signals — low conviction'}
-      </div>
-    </div>
-  );
-}
-
-function TokenCard({ symbol, data, isSpotlight }: { symbol: string; data: any; isSpotlight?: boolean }) {
-  const col = data.posture === 'BULLISH' ? C.green : data.posture === 'BEARISH' ? C.red : C.yellow;
-  return (
-    <div style={{ padding: '10px 12px', border: `1px solid ${col}22`,
-      borderRadius: 6, background: `${col}05`,
-      ...(isSpotlight ? { boxShadow: `0 0 12px ${col}22`, border: `1px solid ${col}44` } : {}) }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 14 }}>{TOKEN_ICONS[symbol] ?? '◈'}</span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: C.text, fontFamily: FM }}>{symbol}</span>
-          {isSpotlight && (
-            <span style={{ fontSize: 6, color: col, border: `1px solid ${col}33`,
-              borderRadius: 3, padding: '1px 5px', letterSpacing: 1, fontFamily: FM }}>
-              SPOTLIGHT
-            </span>
-          )}
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 8, fontWeight: 700, color: col, fontFamily: FM, letterSpacing: 1 }}>
-            {data.posture}
-          </div>
-          <div style={{ fontSize: 7, color: C.dim }}>{data.confidence}%</div>
-        </div>
-      </div>
-      <div style={{ fontSize: 8, color: 'rgba(180,200,220,0.65)', lineHeight: 1.6, fontFamily: FM }}>
-        {data.note}
-      </div>
-      <div style={{ marginTop: 6, height: 2, background: 'rgba(255,255,255,0.05)', borderRadius: 1, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${data.confidence}%`, background: col, borderRadius: 1 }} />
-      </div>
-    </div>
-  );
-}
-
-function NarrativeTag({ n }: { n: any }) {
-  const col = n.direction === 'gaining' ? C.green : n.direction === 'declining' ? C.red : C.orange;
-  return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-      border: `1px solid ${col}22`, borderRadius: 20, background: `${col}08`, flexShrink: 0 }}>
-      <span style={{ fontSize: 10 }}>{n.icon}</span>
-      <span style={{ fontSize: 8, color: col, fontFamily: FM, letterSpacing: 1 }}>{n.label}</span>
-      {n.momentum !== 0 && (
-        <span style={{ fontSize: 7, color: col, fontFamily: FM }}>
-          {n.momentum > 0 ? '+' : ''}{n.momentum}%
-        </span>
-      )}
-    </div>
-  );
-}
-
-function AnomalyAlert({ anomaly, onDismiss }: { anomaly: any; onDismiss: (id: number) => void }) {
-  const sevColor = anomaly.severity === 'critical' ? '#ff00aa'
-    : anomaly.severity === 'high' ? C.red
-    : C.orange;
-  const icons: Record<string, string> = {
-    WHALE_SPIKE: '🐋', BRIDGE_SURGE: '🌉', TPS_DROP: '⚠', FNG_DROP: '📉', CONCENTRATION: '🎯',
-  };
-  return (
-    <div style={{ padding: '10px 14px', border: `1px solid ${sevColor}33`,
-      borderRadius: 6, background: `${sevColor}06`,
-      display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-      <span style={{ fontSize: 16, flexShrink: 0 }}>{icons[anomaly.type] ?? '⚡'}</span>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: sevColor, fontFamily: FM, marginBottom: 3 }}>
-          {anomaly.title}
-        </div>
-        <div style={{ fontSize: 8, color: C.dim, lineHeight: 1.6 }}>{anomaly.detail}</div>
-        <div style={{ fontSize: 7, color: C.dim, marginTop: 4 }}>
-          {new Date(anomaly.created_at * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} UTC
-        </div>
-      </div>
-      <button onClick={() => onDismiss(anomaly.id)}
-        style={{ background: 'none', border: 'none', color: C.dim, cursor: 'pointer', fontSize: 10, padding: '0 4px', flexShrink: 0 }}>
-        ✕
-      </button>
-    </div>
-  );
-}
-
-const SECTION_META: Record<string, { label: string; icon: string }> = {
-  network:          { label: 'SOLANA NETWORK',    icon: '🔗' },
-  capital_flow:     { label: 'CAPITAL FLOW',       icon: '💸' },
-  market_structure: { label: 'MARKET STRUCTURE',   icon: '📊' },
-  smart_money:      { label: 'SMART MONEY',        icon: '🐋' },
-  outlook:          { label: 'OUTLOOK',            icon: '🔭' },
-};
-
 function HubAiTab() {
-  const [signals,   setSignals]   = useState<any[]>([]);
-  const [anomalies, setAnomalies] = useState<any[]>([]);
-  const [sigCount,  setSigCount]  = useState(0);
-  const [loading,   setLoading]   = useState(true);
-  const [unlocked,  setUnlocked]  = useState(() => {
+  const [signals,  setSignals]  = useState<any[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [unlocked, setUnlocked] = useState(() => {
     try {
       const exp = localStorage.getItem('hubai_unlock_exp');
       return exp ? Date.now() < parseInt(exp) : false;
     } catch { return false; }
   });
-  const [unlocking,  setUnlocking]  = useState(false);
-  const [expanded,   setExpanded]   = useState<number | null>(0);
-  const [activeView, setActiveView] = useState<'briefs' | 'anomalies'>('briefs');
-  const [lastMs,     setLastMs]     = useState(0);
+  const [unlocking, setUnlocking] = useState(false);
+  const [expanded,  setExpanded]  = useState<number | null>(0);
+  const [lastMs,    setLastMs]    = useState(0);
 
-  // Auto-unlock checks
+  // Auto-unlock if gate off or whitelisted
   useEffect(() => {
     if (unlocked) return;
     async function check() {
@@ -1843,9 +1702,7 @@ function HubAiTab() {
     try {
       const r = await fetch('/api/hub-ai', { headers: { 'x-wallet': wallet } });
       const d = await r.json();
-      if (d.signals)   { setSignals(d.signals); setLastMs(Date.now()); }
-      if (d.anomalies) setAnomalies(d.anomalies);
-      if (d.signalCount) setSigCount(d.signalCount);
+      if (d.signals) { setSignals(d.signals); setLastMs(Date.now()); }
     } catch {} finally { setLoading(false); }
   }, []);
 
@@ -1870,56 +1727,47 @@ function HubAiTab() {
       if (d.success) {
         localStorage.setItem('hubai_unlock_exp', String(Date.now() + 24 * 60 * 60 * 1000));
         setUnlocked(true);
-      } else alert(d.error || 'Need 50 points');
+      } else {
+        alert(d.error || 'Need 50 points to unlock');
+      }
     } catch { alert('Failed — try again'); }
     setUnlocking(false);
   }
 
-  async function dismissAnomaly(id: number) {
-    setAnomalies(prev => prev.filter(a => a.id !== id));
-    fetch('/api/hub-ai/dismiss-anomaly', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    }).catch(() => {});
-  }
-
-  // ── Lock screen ──────────────────────────────────────────────────────────
+  // ── Lock screen ────────────────────────────────────────────────────────────
   if (!unlocked) return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', gap: 18, padding: 28, fontFamily: FM }}>
-      <div style={{ fontSize: 40 }}>🤖</div>
+      justifyContent: 'center', gap: 20, padding: 32, fontFamily: FM }}>
+      <div style={{ fontSize: 36 }}>🤖</div>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontFamily: FH, fontSize: 24, letterSpacing: 4, color: C.cyan, marginBottom: 4 }}>HUB AI</div>
-        <div style={{ fontSize: 8, color: C.dim, letterSpacing: 3 }}>INTELLIGENCE DIGEST · TWICE DAILY</div>
+        <div style={{ fontFamily: FH, fontSize: 22, letterSpacing: 4, color: C.cyan, marginBottom: 6 }}>HUB AI</div>
+        <div style={{ fontSize: 8, color: C.dim, letterSpacing: 2 }}>INTELLIGENCE BRIEFS · TWICE DAILY</div>
       </div>
-      <div style={{ maxWidth: 360, textAlign: 'center', fontSize: 9, color: C.dim, lineHeight: 1.9 }}>
-        Comprehensive AI intelligence briefs with per-token analysis, confluence scoring,
-        active narrative tracking, and real-time anomaly alerts — all synthesised from live platform data.
+      <div style={{ maxWidth: 340, textAlign: 'center', fontSize: 9, color: C.dim, lineHeight: 1.8 }}>
+        Comprehensive AI-generated market intelligence briefs dropped at 09:00 and 18:00 UTC.
+        Synthesises chain data, capital flows, whale activity, and live market conditions.
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%', maxWidth: 360 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%', maxWidth: 340 }}>
         {[
-          { icon: '📡', text: 'Live chain + market data'  },
-          { icon: '🎯', text: 'Confluence scoring 0-100'   },
-          { icon: '◎⚡🐶🐕', text: 'Per-token analysis'  },
-          { icon: '🚨', text: 'Real-time anomaly alerts'  },
-          { icon: '🗺', text: 'Narrative momentum tags'   },
-          { icon: '📈', text: 'Signal history tracking'   },
+          { icon: '📡', text: 'Live chain & market data' },
+          { icon: '🌊', text: 'Capital flow analysis'   },
+          { icon: '🐋', text: 'Whale activity signals'  },
+          { icon: '🌐', text: 'Web-connected AI'        },
         ].map((f, i) => (
-          <div key={i} style={{ padding: '8px 10px', border: `1px solid ${C.border}`,
-            borderRadius: 5, background: C.cyanFaint, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11 }}>{f.icon}</span>
+          <div key={i} style={{ padding: '8px 10px', border: `1px solid ${C.border}`, borderRadius: 5,
+            background: C.cyanFaint, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12 }}>{f.icon}</span>
             <span style={{ fontSize: 8, color: C.dim }}>{f.text}</span>
           </div>
         ))}
       </div>
-      <div style={{ textAlign: 'center', padding: '10px 24px', border: `1px solid ${C.border}`,
+      <div style={{ textAlign: 'center', padding: '10px 20px', border: `1px solid ${C.border}`,
         borderRadius: 6, background: C.cyanFaint }}>
-        <div style={{ fontSize: 20, fontFamily: FH, color: '#ffdd00', letterSpacing: 2 }}>50 PTS · 24HR ACCESS</div>
-        <div style={{ fontSize: 7, color: C.dim, marginTop: 2 }}>Briefs drop at 09:00 UTC and 18:00 UTC daily</div>
+        <div style={{ fontSize: 20, fontFamily: FH, color: '#ffdd00', letterSpacing: 2 }}>50 PTS</div>
+        <div style={{ fontSize: 7, color: C.dim, marginTop: 2 }}>UNLOCKS FOR 24 HOURS</div>
       </div>
       <button onClick={handleUnlock} disabled={unlocking}
-        style={{ padding: '10px 36px', borderRadius: 4, border: `1px solid ${C.cyan}`,
+        style={{ padding: '10px 32px', borderRadius: 4, border: `1px solid ${C.cyan}`,
           background: C.cyanFaint, color: C.cyan, fontFamily: FM, fontSize: 10,
           letterSpacing: 2, fontWeight: 700, cursor: unlocking ? 'not-allowed' : 'pointer',
           opacity: unlocking ? 0.6 : 1 }}>
@@ -1930,15 +1778,15 @@ function HubAiTab() {
 
   if (loading) return <Loader />;
 
-  // ── Empty state ──────────────────────────────────────────────────────────
-  if (signals.length === 0 && anomalies.length === 0) return (
+  // ── Empty state ────────────────────────────────────────────────────────────
+  if (signals.length === 0) return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', gap: 14, padding: 28, fontFamily: FM }}>
-      <div style={{ fontSize: 32 }}>🤖</div>
+      justifyContent: 'center', gap: 12, padding: 24, fontFamily: FM }}>
+      <div style={{ fontSize: 28 }}>🤖</div>
       <div style={{ fontFamily: FH, fontSize: 18, letterSpacing: 3, color: C.cyan }}>HUB AI</div>
-      <div style={{ fontSize: 9, color: C.dim, textAlign: 'center', lineHeight: 1.8, maxWidth: 300 }}>
-        No briefs generated yet. First brief drops at 09:00 UTC.
-        The owner can generate one manually from the admin dashboard.
+      <div style={{ fontSize: 9, color: C.dim, textAlign: 'center', lineHeight: 1.8, maxWidth: 280 }}>
+        No briefs generated yet. The first brief drops at 09:00 UTC.
+        The owner can also generate one manually from the admin dashboard.
       </div>
       <div style={{ fontSize: 8, color: C.dim }}>
         Next brief: {new Date().getUTCHours() < 9 ? '09:00 UTC today' : new Date().getUTCHours() < 18 ? '18:00 UTC today' : '09:00 UTC tomorrow'}
@@ -1946,186 +1794,113 @@ function HubAiTab() {
     </div>
   );
 
-  const latestSignal = signals[0];
-  const latestBrief  = latestSignal ? (typeof latestSignal.brief === 'string' ? JSON.parse(latestSignal.brief) : latestSignal.brief) : null;
+  const POSTURE_COLOR: Record<string, string> = {
+    'CAUTIOUSLY BULLISH': '#88ff44',
+    'BULLISH':            '#00ff88',
+    'STRONGLY BULLISH':   '#00ff88',
+    'NEUTRAL':            '#ffdd00',
+    'CAUTIOUSLY BEARISH': '#ffaa00',
+    'BEARISH':            '#ff3355',
+    'RISK-OFF':           '#ff3355',
+    'CONSTRUCTIVE':       '#00b4ff',
+  };
+
+  const SECTION_LABELS: Record<string, string> = {
+    network:          '🔗 SOLANA NETWORK',
+    capital_flow:     '💸 CAPITAL FLOW',
+    market_structure: '📊 MARKET STRUCTURE',
+    smart_money:      '🐋 SMART MONEY',
+    outlook:          '🔭 OUTLOOK',
+  };
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: FM }}>
-
-      {/* ── Top bar ── */}
-      <div style={{ padding: '8px 12px 0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontFamily: FH, fontSize: 16, letterSpacing: 3, color: C.cyan }}>HUB AI</span>
-            <span style={{ fontSize: 7, color: C.dim }}>INTELLIGENCE DIGEST</span>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {anomalies.length > 0 && (
-              <button onClick={() => setActiveView(v => v === 'anomalies' ? 'briefs' : 'anomalies')}
-                style={{ padding: '3px 8px', borderRadius: 3,
-                  border: `1px solid ${C.red}44`, background: `${C.red}11`,
-                  color: C.red, fontSize: 7, cursor: 'pointer', fontFamily: FM,
-                  animation: 'livePulse 2s ease-in-out infinite' }}>
-                🚨 {anomalies.length} ALERT{anomalies.length > 1 ? 'S' : ''}
-              </button>
-            )}
-            <RefreshBadge ms={lastMs} every={300} />
-          </div>
+      {/* Header */}
+      <div style={{ padding: '8px 12px 0', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontFamily: FH, fontSize: 16, letterSpacing: 3, color: C.cyan }}>HUB AI</span>
+          <span style={{ fontSize: 7, color: C.dim }}>INTELLIGENCE BRIEFS</span>
         </div>
-
-        {/* Signal count */}
-        {sigCount > 0 && (
-          <div style={{ fontSize: 7, color: C.dim, marginBottom: 6 }}>
-            {sigCount} briefs generated since launch
-          </div>
-        )}
-
-        {/* View toggle */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-          {(['briefs', 'anomalies'] as const).map(v => (
-            <button key={v} onClick={() => setActiveView(v)}
-              style={{ padding: '4px 12px', borderRadius: 3, border: `1px solid ${activeView === v ? C.cyan : C.border}`,
-                background: activeView === v ? C.cyanFaint : 'transparent',
-                color: activeView === v ? C.cyan : C.dim,
-                fontSize: 7, cursor: 'pointer', fontFamily: FM, letterSpacing: 1 }}>
-              {v === 'briefs' ? `📋 BRIEFS (${signals.length})` : `🚨 ANOMALIES (${anomalies.length})`}
-            </button>
-          ))}
-        </div>
+        <RefreshBadge ms={lastMs} every={300} />
       </div>
 
-      {/* ── Content ── */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 6px 16px',
-        scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,180,255,0.15) transparent' }}>
-
-        {/* ANOMALIES VIEW */}
-        {activeView === 'anomalies' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {anomalies.length === 0
-              ? <div style={{ textAlign: 'center', padding: '40px 20px', color: C.dim, fontSize: 9 }}>
-                  No active anomalies — all signals within normal range
-                </div>
-              : anomalies.map(a => <AnomalyAlert key={a.id} anomaly={a} onDismiss={dismissAnomaly} />)
-            }
-          </div>
-        )}
-
-        {/* BRIEFS VIEW */}
-        {activeView === 'briefs' && signals.map((sig, idx) => {
-          const brief      = typeof sig.brief === 'string' ? JSON.parse(sig.brief) : sig.brief;
-          const tokens     = typeof sig.tokens === 'string' ? JSON.parse(sig.tokens) : (sig.tokens ?? {});
-          const narratives: any[] = typeof sig.narratives === 'string' ? JSON.parse(sig.narratives) : (sig.narratives ?? []);
-          const isOpen     = expanded === idx;
-          const pColor     = postureColor(brief?.posture ?? 'NEUTRAL');
-          const pBg        = postureBg(brief?.posture ?? 'NEUTRAL');
-          const slotLabel  = sig.slot === 'morning' ? '🌅 MORNING · 09:00 UTC'
-            : sig.slot === 'evening' ? '🌆 EVENING · 18:00 UTC'
-            : '⚙ MANUAL BRIEF';
-          const dateLabel  = new Date(sig.created_at * 1000).toLocaleDateString('en-US',
-            { weekday: 'short', month: 'short', day: 'numeric' });
+      {/* Briefs list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px 16px', scrollbarWidth: 'thin',
+        scrollbarColor: 'rgba(0,180,255,0.15) transparent' }}>
+        {signals.map((sig, idx) => {
+          const brief       = typeof sig.brief === 'string' ? JSON.parse(sig.brief) : sig.brief;
+          const postureColor = POSTURE_COLOR[brief?.posture] ?? C.cyan;
+          const isOpen      = expanded === idx;
+          const slotLabel   = sig.slot === 'morning' ? '🌅 MORNING BRIEF · 09:00 UTC' : '🌆 EVENING BRIEF · 18:00 UTC';
+          const dateLabel   = new Date(sig.created_at * 1000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
           return (
-            <div key={sig.id} style={{ marginBottom: 10, border: `1px solid ${pColor}22`,
-              borderRadius: 8, overflow: 'hidden', background: pBg }}>
+            <div key={sig.id} style={{ marginBottom: 10, border: `1px solid ${postureColor}22`,
+              borderRadius: 8, overflow: 'hidden', background: `${postureColor}05` }}>
 
-              {/* ── Brief header ── */}
+              {/* Brief header — always visible */}
               <button onClick={() => setExpanded(isOpen ? null : idx)}
-                style={{ width: '100%', padding: '12px 14px', background: 'transparent',
-                  border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <div style={{ flex: 1 }}>
-                    {/* Date + slot */}
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 7, color: C.dim, fontFamily: FM }}>{slotLabel}</span>
-                      <span style={{ fontSize: 7, color: C.dim }}>·</span>
-                      <span style={{ fontSize: 7, color: C.dim }}>{dateLabel}</span>
-                    </div>
-                    {/* Posture */}
-                    <div style={{ fontFamily: FH, fontSize: 20, letterSpacing: 3, color: pColor, marginBottom: 4 }}>
-                      {brief?.posture ?? '—'}
-                    </div>
-                    {/* Headline */}
-                    {brief?.headline && (
-                      <div style={{ fontSize: 8, color: 'rgba(180,200,220,0.7)', lineHeight: 1.6, fontFamily: FM }}>
-                        {brief.headline}
-                      </div>
-                    )}
+                style={{ width: '100%', padding: '12px 14px', background: 'transparent', border: 'none',
+                  cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}>
+
+                {/* Slot + date */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 8, color: C.dim, fontFamily: FM, letterSpacing: 1 }}>{slotLabel}</span>
+                    <span style={{ fontSize: 7, color: C.dim }}>·</span>
+                    <span style={{ fontSize: 7, color: C.dim }}>{dateLabel}</span>
                   </div>
-                  {/* Confidence + confluence */}
-                  <div style={{ textAlign: 'center', flexShrink: 0 }}>
-                    <div style={{ fontSize: 7, color: C.dim, letterSpacing: 1, marginBottom: 1 }}>CONFIDENCE</div>
-                    <div style={{ fontSize: 22, fontFamily: FH, color: pColor }}>{brief?.confidence ?? '—'}%</div>
-                    {sig.confluence > 0 && (
-                      <div style={{ fontSize: 7, color: C.dim, marginTop: 2 }}>
-                        {sig.confluence}/100 confluence
-                      </div>
-                    )}
+                  <div style={{ fontFamily: FH, fontSize: 18, letterSpacing: 3, color: postureColor }}>
+                    {brief?.posture ?? '—'}
                   </div>
-                  <span style={{ fontSize: 10, color: C.dim, flexShrink: 0,
-                    transition: 'transform 0.2s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▾</span>
                 </div>
+
+                {/* Confidence */}
+                <div style={{ textAlign: 'center', flexShrink: 0 }}>
+                  <div style={{ fontSize: 7, color: C.dim, letterSpacing: 1, marginBottom: 2 }}>CONFIDENCE</div>
+                  <div style={{ fontSize: 22, fontFamily: FH, color: postureColor }}>{brief?.confidence ?? '—'}%</div>
+                </div>
+
+                {/* Expand arrow */}
+                <span style={{ fontSize: 10, color: C.dim, flexShrink: 0, transition: 'transform 0.2s',
+                  transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▾</span>
               </button>
 
-              {/* ── Expanded content ── */}
+              {/* Expanded content */}
               {isOpen && (
-                <div style={{ padding: '0 14px 14px', borderTop: `1px solid ${pColor}15` }}>
+                <div style={{ padding: '0 14px 14px', borderTop: `1px solid ${postureColor}15` }}>
 
-                  {/* Confluence bar */}
-                  {sig.confluence > 0 && (
-                    <div style={{ margin: '12px 0' }}>
-                      <ConfluenceBar score={sig.confluence} />
-                    </div>
-                  )}
-
-                  {/* Active narratives */}
-                  {narratives.length > 0 && (
-                    <div style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 7, letterSpacing: 2, color: C.cyanDim, fontFamily: FM, marginBottom: 6 }}>
-                        🗺 ACTIVE NARRATIVES
-                      </div>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {narratives.map((n, i) => <NarrativeTag key={i} n={n} />)}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Analysis sections */}
-                  {brief?.sections && Object.entries(brief.sections).map(([key, text]: [string, any]) => {
-                    const meta = SECTION_META[key] ?? { label: key.toUpperCase(), icon: '◈' };
-                    return (
-                      <div key={key} style={{ marginBottom: 12 }}>
-                        <div style={{ fontSize: 8, letterSpacing: 2, color: C.cyanDim, fontFamily: FM, marginBottom: 5 }}>
-                          {meta.icon} {meta.label}
-                        </div>
-                        <div style={{ fontSize: 9, color: 'rgba(180,200,220,0.75)', lineHeight: 1.8,
-                          fontFamily: FM, borderLeft: `2px solid ${pColor}33`, paddingLeft: 10 }}>
-                          {text}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {/* Per-token breakdown */}
-                  {Object.keys(tokens).length > 0 && (
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ fontSize: 8, letterSpacing: 2, color: C.cyanDim, fontFamily: FM, marginBottom: 8 }}>
-                        ◈ TOKEN ANALYSIS
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                        {Object.entries(tokens).map(([sym, data]: [string, any], i) => (
-                          <TokenCard key={sym} symbol={sym} data={data} isSpotlight={i === 4} />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Sources + timestamp */}
-                  <div style={{ padding: '6px 10px', background: 'rgba(255,255,255,0.02)',
-                    borderRadius: 4, border: `1px solid ${C.border}` }}>
-                    <div style={{ fontSize: 7, color: C.dim, letterSpacing: 1 }}>
-                      Generated: {new Date(sig.created_at * 1000).toLocaleString('en-US', { timeZone: 'UTC' })} UTC
+                  {/* Confidence bar */}
+                  <div style={{ margin: '12px 0 14px' }}>
+                    <div style={{ height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${brief?.confidence ?? 0}%`,
+                        background: `linear-gradient(90deg,${postureColor}66,${postureColor})`,
+                        borderRadius: 2, transition: 'width 0.8s ease' }} />
                     </div>
                   </div>
+
+                  {/* Sections */}
+                  {brief?.sections && Object.entries(brief.sections).map(([key, text]: [string, any]) => (
+                    <div key={key} style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 8, letterSpacing: 2, color: C.cyanDim, fontFamily: FM, marginBottom: 5 }}>
+                        {SECTION_LABELS[key] ?? key.toUpperCase()}
+                      </div>
+                      <div style={{ fontSize: 9, color: 'rgba(180,200,220,0.75)', lineHeight: 1.8,
+                        fontFamily: FM, borderLeft: `2px solid ${postureColor}33`, paddingLeft: 10 }}>
+                        {text}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Sources used */}
+                  {sig.sources_used && (
+                    <div style={{ marginTop: 8, padding: '6px 10px', background: 'rgba(255,255,255,0.02)',
+                      borderRadius: 4, border: `1px solid ${C.border}` }}>
+                      <div style={{ fontSize: 7, color: C.dim, letterSpacing: 1 }}>
+                        DATA SOURCES: {(Array.isArray(sig.sources_used) ? sig.sources_used : JSON.parse(sig.sources_used)).join(' · ').toUpperCase()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2134,10 +1909,10 @@ function HubAiTab() {
 
         {/* Disclaimer */}
         <div style={{ padding: '10px 12px', border: `1px solid ${C.border}`, borderRadius: 6,
-          background: C.cyanFaint, margin: '4px 0 8px' }}>
+          background: C.cyanFaint, margin: '0 0 8px' }}>
           <div style={{ fontSize: 7, color: C.dim, lineHeight: 1.7 }}>
-            ℹ HUB AI synthesises data from ProtocolHub panels, chain metrics, and market signals.
-            All briefs are informational only — not financial advice.
+            ℹ HUB AI briefs are synthesised from platform data and publicly available market information.
+            They represent analytical observations, not financial advice or investment recommendations.
           </div>
         </div>
       </div>
