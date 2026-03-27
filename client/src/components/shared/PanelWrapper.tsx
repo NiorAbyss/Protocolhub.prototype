@@ -1,7 +1,9 @@
-import React from 'react';
+
+
+import { ReactNode } from 'react';
 
 interface PanelWrapperProps {
-  children: React.ReactNode;
+  children: ReactNode;
   active: boolean;
   onClose: () => void;
 }
@@ -21,7 +23,7 @@ export default function PanelWrapper({ children, active, onClose }: PanelWrapper
           onClick={onClose} 
           className="absolute top-6 right-8 text-cyan-500/50 hover:text-cyan-400 font-mono text-xs tracking-widest z-50 transition-colors"
         >
-          [ ESC_CLOSE ]
+          [ X ]
         </button>
 
         {/* The HUD Content Area: 
