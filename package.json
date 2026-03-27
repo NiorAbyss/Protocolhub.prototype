@@ -109,7 +109,8 @@
   "overrides": {
     "drizzle-kit": {
       "@esbuild-kit/esm-loader": "npm:tsx@^4.20.4"
-    }
+    },
+    "@solana/wallet-adapter-base": "^0.9.23"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
