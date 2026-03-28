@@ -3,7 +3,7 @@ import App from "./App";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(<App />);
-import NetworkPanel from './NetworkPanel'
+import NetworkPanel from './components/hud/NetworkPanel';
 // then use:
 <NetworkPanel />
 ```
