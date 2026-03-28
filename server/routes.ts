@@ -2,7 +2,7 @@ import express, { type Express } from "express";
 import rateLimit from "express-rate-limit";
 import { type Server } from "http";
 import { storage } from "./storage";
-import { api } from "@shared/routes";
+import { api } from "../shared/routes";
 import { z } from "zod";
 import axios from "axios";
 import http  from "http";
