@@ -5,8 +5,8 @@
 // Server cache: market 60s · pairs 60s · yields 5min · news 10min
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import AiScoreBadge from '../src/AiScoreBadge';
-import { scoreFromCoinGecko, scoreFromDexScreener } from '../../aiScoring';
+import AiScoreBadge from '../../aiscorebadge';
+import { scoreFromCoinGecko, scoreFromDexScreener } from '../../aiscoring';
 import ComingSoon from '../shared/ComingSoon';
 
 /* ─── FONTS ──────────────────────────────────────────────────────────────── */
