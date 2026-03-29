@@ -505,14 +505,14 @@ function MintPanel({
   const { connection }      = useConnection();
 
   const [selectedTier, setSelectedTier] = useState<Tier>('bronze');
-  const [step,         setStep]         = useState<MintStep>('idle');
+  const [step,         setStep]         = useState<MintStep>(() => (sessionStorage.getItem('mintStep') as MintStep) || 'idle');
   const [error,        setError]        = useState<string | null>(null);
   const [txSig,        setTxSig]        = useState<string | null>(null);
 
   const isBusy = step !== 'idle' && step !== 'done';
 
   async function handleMint() {
-    setStep('building');
+    setStep('building'); sessionStorage.setItem('mintStep', 'building');
     setError(null);
 
     try {
@@ -542,11 +542,11 @@ function MintPanel({
       tx.feePayer = fromPubkey;
 
       // Step 4 — Send to wallet for signing
-      setStep('signing');
+      setStep('signing'); sessionStorage.setItem('mintStep', 'signing');
       const sig = await sendTransaction(tx, connection);
 
       // Step 5 — Wait for confirmation
-      setStep('confirming');
+      setStep('confirming'); sessionStorage.setItem('mintStep', 'confirming');
       await connection.confirmTransaction(sig, 'confirmed');
 
       // Step 6 — Notify backend
@@ -557,7 +557,7 @@ function MintPanel({
       });
 
       setTxSig(sig);
-      setStep('done');
+      setStep('done'); sessionStorage.removeItem('mintStep');
       onSuccess();
 
     } catch (err: any) {
@@ -573,7 +573,7 @@ function MintPanel({
       } else {
         setError(err?.message || 'Something went wrong — please try again.');
       }
-      setStep('idle');
+      setStep('idle'); sessionStorage.removeItem('mintStep');
     }
   }
 
