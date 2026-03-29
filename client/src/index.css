@@ -5,69 +5,49 @@
 @tailwind utilities;
 
 :root {
-  /* Vercel-inspired Minimalist Palette */
   --font-sans: 'Geist', sans-serif;
   --font-display: 'Geist', sans-serif;
   --font-mono: 'Geist Mono', monospace;
 
-  /* Clean Light Mode */
   --background: 0 0% 100%;
   --foreground: 0 0% 0%;
-  
   --card: 0 0% 100%;
   --card-foreground: 0 0% 0%;
-  
   --popover: 0 0% 100%;
   --popover-foreground: 0 0% 0%;
-  
   --primary: 0 0% 0%;
   --primary-foreground: 0 0% 100%;
-  
   --secondary: 0 0% 96%;
   --secondary-foreground: 0 0% 0%;
-  
   --muted: 0 0% 96%;
   --muted-foreground: 0 0% 45%;
-  
   --accent: 0 0% 96%;
   --accent-foreground: 0 0% 0%;
-  
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 98%;
-
   --border: 0 0% 92%;
   --input: 0 0% 92%;
   --ring: 0 0% 0%;
-  
   --radius: 0.5rem;
 }
 
 .dark {
-  /* Deep Dark Mode */
   --background: 0 0% 3%;
   --foreground: 0 0% 98%;
-  
   --card: 0 0% 3%;
   --card-foreground: 0 0% 98%;
-  
   --popover: 0 0% 3%;
   --popover-foreground: 0 0% 98%;
-  
   --primary: 0 0% 98%;
   --primary-foreground: 0 0% 9%;
-  
   --secondary: 0 0% 10%;
   --secondary-foreground: 0 0% 98%;
-  
   --muted: 0 0% 10%;
   --muted-foreground: 0 0% 60%;
-  
   --accent: 0 0% 10%;
   --accent-foreground: 0 0% 98%;
-  
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 0 0% 98%;
-  
   --border: 0 0% 15%;
   --input: 0 0% 15%;
   --ring: 0 0% 83%;
@@ -78,8 +58,15 @@
     border-color: hsl(var(--border));
   }
   body {
-    @apply bg-background text-foreground antialiased selection:bg-foreground selection:text-background;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background-color: hsl(var(--foreground));
+    color: hsl(var(--background));
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
@@ -92,7 +79,13 @@
     text-wrap: balance;
   }
   .glass-panel {
-    @apply bg-white/80 dark:bg-black/80 backdrop-blur-md border border-border shadow-sm;
+    background-color: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--border));
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .dark .glass-panel {
+    background-color: rgba(0, 0, 0, 0.8);
   }
 }
 
