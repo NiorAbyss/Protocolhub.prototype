@@ -75,7 +75,7 @@
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
   }
   body {
     @apply bg-background text-foreground antialiased selection:bg-foreground selection:text-background;
@@ -104,5 +104,7 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-border rounded-full hover:bg-muted-foreground/50 transition-colors;
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+  transition: background-color 0.2s;
 }
