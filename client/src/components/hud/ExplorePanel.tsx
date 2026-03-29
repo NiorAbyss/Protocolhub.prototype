@@ -590,6 +590,26 @@ function SniperTab() {
     setUnlocking(false);
   }
 
+  const [tokens, setTokens] = useState<any[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
+  const [lastMs2, setLastMs2] = useState(0);
+
+  useEffect(() => {
+    if (!unlocked) return;
+    async function fetchSniper() {
+      setLoadingData(true);
+      try {
+        const r = await fetch('/api/explore/sniper');
+        const d = await r.json();
+        setTokens(d.tokens || []);
+        setLastMs2(Date.now());
+      } catch {} finally { setLoadingData(false); }
+    }
+    fetchSniper();
+    const t = setInterval(fetchSniper, 15_000);
+    return () => clearInterval(t);
+  }, [unlocked]);
+
   if (!unlocked) return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 28, fontFamily: FM }}>
       <div style={{ fontSize: 40 }}>⚡</div>
@@ -607,11 +627,45 @@ function SniperTab() {
     </div>
   );
 
+  if (loadingData && tokens.length === 0) return (
+    <div style={{ height:'100%', display:'flex', alignItems:'center', justifyContent:'center', color:C.dim, fontFamily:FM, fontSize:10, gap:8 }}>
+      <div style={{ width:14, height:14, border:`1px solid ${C.cyanFaint}`, borderTop:`1px solid ${C.cyan}`, borderRadius:'50%', animation:'exploreSpin 0.8s linear infinite' }} />
+      Loading sniper data...
+    </div>
+  );
+
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.dim, fontSize: 10, fontFamily: FM }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 28, marginBottom: 8 }}>⚡</div>
-        <div>Sniper data loading...</div>
+    <div style={{ height:'100%', display:'flex', flexDirection:'column', fontFamily:FM }}>
+      <div style={{ padding:'6px 4px', borderBottom:`1px solid ${C.border}`, flexShrink:0, display:'flex', alignItems:'center', gap:10 }}>
+        <span style={{ fontFamily:FH, fontSize:13, letterSpacing:2, color:C.purple }}>⚡ TOKEN SNIPER</span>
+        <span style={{ fontSize:7, color:C.dim }}>{tokens.length} new launches · 24h window</span>
+        <div style={{ marginLeft:'auto' }}><RefreshBadge ms={lastMs2} every={15} /></div>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 65px 55px 70px 60px 55px', gap:5, padding:'4px 4px', borderBottom:`1px solid ${C.border}`, minWidth:440 }}>
+        {['TOKEN','PRICE','5M%','LIQ','VOL1H','AGE'].map(h => (
+          <div key={h} style={{ fontSize:7, color:C.dim, letterSpacing:2 }}>{h}</div>
+        ))}
+      </div>
+      <div style={{ flex:1, overflowY:'auto', overflowX:'auto', scrollbarWidth:'thin', scrollbarColor:'rgba(0,180,255,0.15) transparent' }}>
+        {tokens.length === 0 ? (
+          <div style={{ textAlign:'center', padding:40, color:C.dim, fontSize:9 }}>No new launches in the last 24h</div>
+        ) : tokens.map((t, i) => {
+          const age = t.createdAt ? Math.floor((Date.now() - t.createdAt) / 60000) : 0;
+          const ageStr = age < 60 ? `${age}m` : `${Math.floor(age/60)}h`;
+          return (
+            <div key={t.pairAddress} style={{ display:'grid', gridTemplateColumns:'1fr 65px 55px 70px 60px 55px', gap:5, padding:'6px 4px', borderBottom:`1px solid rgba(255,255,255,0.03)`, alignItems:'center', minWidth:440 }}>
+              <div>
+                <div style={{ fontSize:10, fontWeight:700, color:C.text }}>{t.symbol}</div>
+                <div style={{ fontSize:7, color:C.dim }}>{t.dexId}</div>
+              </div>
+              <span style={{ fontSize:9, color:C.silver }}>{t.priceUsd < 0.0001 ? t.priceUsd.toExponential(2) : `$${t.priceUsd.toFixed(5)}`}</span>
+              <span style={{ fontSize:9, fontWeight:700, color:t.priceChange5m >= 0 ? C.green : C.red }}>{t.priceChange5m >= 0 ? '+' : ''}{t.priceChange5m?.toFixed(1)}%</span>
+              <span style={{ fontSize:9, color:C.dim }}>${fmtBig(t.liquidityUsd)}</span>
+              <span style={{ fontSize:9, color:C.dim }}>${fmtBig(t.volume1h)}</span>
+              <span style={{ fontSize:8, color:C.cyanDim }}>{ageStr}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

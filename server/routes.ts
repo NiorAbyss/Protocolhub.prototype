@@ -640,6 +640,20 @@ function analyzeWalletActivity(transactions: any[]) {
   return { realWallets, botWallets, burnedWallets: botWallets };
 }
 
+
+async function heliusGet(path: string, params: any = {}) {
+  const keyA = process.env.HELIUS_API || '';
+  const keyB = process.env.HELIUS_API_B || '';
+  try {
+    return await axios.get(`https://api.helius.xyz${path}`, { params: { 'api-key': keyA, ...params } });
+  } catch (e: any) {
+    if (e?.response?.status === 429 && keyB) {
+      console.warn('[HELIUS] Key A rate limited — switching to Key B');
+      return await axios.get(`https://api.helius.xyz${path}`, { params: { 'api-key': keyB, ...params } });
+    }
+    throw e;
+  }
+}
 async function fetchPulseOnce(): Promise<PulseCache> {
   const now = Date.now();
   if (CACHE && now - LAST_FETCH < CACHE_TTL) return CACHE;
@@ -691,6 +705,7 @@ const WATCH_PROGRAMS = [
 
 const sseClients = new Set<any>();
 let   liveWs:   WebSocket | null = null;
+let   wsRetries = 0;
 let   wsSource: 'helius' | 'qn' | 'none' = 'none';
 
 function broadcastSSE(event: object) {
@@ -729,6 +744,7 @@ function connectLiveWebSocket(url: string, source: 'helius' | 'qn') {
 
   ws.on('open', () => {
     console.log(`[LIVE WSS] Connected (${source})`);
+    wsRetries = 0;
     WATCH_PROGRAMS.forEach((program, i) => {
       ws.send(JSON.stringify({
         jsonrpc: '2.0', id: i + 1,
@@ -769,14 +785,18 @@ function connectLiveWebSocket(url: string, source: 'helius' | 'qn') {
   ws.on('close', (code: number) => {
     console.warn(`[LIVE WSS] ${source} disconnected (${code}) — reconnecting in 5s`);
     liveWs = null; wsSource = 'none';
-    setTimeout(initLiveWebSocket, 5_000);
+    const delay = Math.min(5_000 * Math.pow(2, wsRetries), 60_000);
+    wsRetries++;
+    setTimeout(initLiveWebSocket, delay);
   });
 
   ws.on('error', (err: Error) => {
     console.error(`[LIVE WSS] ${source} error: ${err.message}`);
     try { ws.terminate(); } catch {}
     liveWs = null; wsSource = 'none';
-    setTimeout(initLiveWebSocket, 5_000);
+    const delay = Math.min(5_000 * Math.pow(2, wsRetries), 60_000);
+    wsRetries++;
+    setTimeout(initLiveWebSocket, delay);
   });
 }
 
@@ -855,7 +875,7 @@ function initLiveWebSocket() {
   const heliusKey = process.env.HELIUS_API;
   const qnUrl     = process.env.QN_WSS_B;
   if (heliusKey) {
-    connectLiveWebSocket(`wss://mainnet.helius-rpc.com/?api-key=${heliusKey}`, 'helius');
+    connectLiveWebSocket(`wss://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_B || heliusKey}`, 'helius');
   } else if (qnUrl) {
     connectLiveWebSocket(qnUrl, 'qn');
   } else {
@@ -1900,7 +1920,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { wallet, txSignature, mintAddress, tier = "bronze" } = req.body;
     if (!wallet || !txSignature) return res.status(400).json({ error: "Wallet and txSignature required" });
     try {
-      const heliusRes = await axios.post(`https://api.helius.xyz/v0/transactions?api-key=${process.env.HELIUS_API}`, { transactions: [txSignature] });
+      const heliusRes = await axios.post(`https://api.helius.xyz/v0/transactions?api-key=${process.env.HELIUS_API_B || process.env.HELIUS_API}`, { transactions: [txSignature] });
       const tx = heliusRes.data?.[0];
       if (!tx || tx.transactionError) return res.status(400).json({ error: "Transaction not found or failed" });
       const mintStats  = getMintCount.get() as any;
@@ -2012,7 +2032,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       // Verify tx on-chain via Helius
       const heliusRes = await axios.post(
-        `https://api.helius.xyz/v0/transactions?api-key=${process.env.HELIUS_API}`,
+        `https://api.helius.xyz/v0/transactions?api-key=${process.env.HELIUS_API_B || process.env.HELIUS_API}`,
         { transactions: [txSignature] }
       );
       const tx = heliusRes.data?.[0];
@@ -2060,7 +2080,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       // Verify tx
       const heliusRes = await axios.post(
-        `https://api.helius.xyz/v0/transactions?api-key=${process.env.HELIUS_API}`,
+        `https://api.helius.xyz/v0/transactions?api-key=${process.env.HELIUS_API_B || process.env.HELIUS_API}`,
         { transactions: [txSignature] }
       );
       const tx = heliusRes.data?.[0];
@@ -2123,7 +2143,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       // Verify wallet actually holds this NFT via Helius
       const heliusRes = await axios.get(
-        `https://api.helius.xyz/v0/addresses/${wallet}/nfts?api-key=${process.env.HELIUS_API}`
+        `https://api.helius.xyz/v0/addresses/${wallet}/nfts?api-key=${process.env.HELIUS_API_B || process.env.HELIUS_API}`
       );
       const nfts: any[] = heliusRes.data || [];
       const ownsNft = nfts.some((n: any) =>
@@ -2591,8 +2611,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } else {
       try {
         // Helius v0 only accepts a single type — omit to get all types
-        const hRes = await axios.get(`https://api.helius.xyz/v0/addresses/${wallet}/transactions`, {
-          params: { "api-key": process.env.HELIUS_API || "", limit: 50 },
+        const hRes = await heliusGet(`/v0/addresses/${wallet}/transactions`, {
+          params: { limit: 50 },
         });
         allTxs = (hRes.data || []).map((tx: any) => {
           // Compute total SOL moved from native transfers
@@ -3914,7 +3934,7 @@ Analyse each token based on the platform data context. The spotlight token shoul
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
 
     try {
-      const hRes = await axios.get(`https://api.helius.xyz/v0/addresses/${wallet}/transactions`, {
+      const hRes = await heliusGet(`/v0/addresses/${wallet}/transactions`, {
         params: { "api-key": process.env.HELIUS_API || "", limit: 100 },
       });
       const txs: any[] = hRes.data || [];
@@ -4840,6 +4860,14 @@ Analyse each token based on the platform data context. The spotlight token shoul
     };
     const cfg = PAGE_CONFIG[page] ?? { cost: 50, durationHrs: 24 };
 
+    // Founder + whitelist bypass — free access, no points deducted
+    const _isFounder = wallet === process.env.FOUNDER_WALLET;
+    const _wl = getWhitelistEntry.get(wallet) as any;
+    if (_isFounder || (_wl && !_wl.revoked)) {
+      const _now = Math.floor(Date.now() / 1000);
+      return res.json({ success: true, pointsBurned: 0, durationHrs: cfg.durationHrs, pointsBalance: 999999, page, accessExpiresAt: new Date((_now + cfg.durationHrs * 3600) * 1000).toISOString() });
+    }
+
     const record = db.prepare(`SELECT * FROM nft_access WHERE wallet=?`).get(wallet) as any;
     if (!record)        return res.status(404).json({ error: "No NFT found for this wallet" });
     if (record.revoked) return res.status(403).json({ error: "Access revoked" });
@@ -5173,7 +5201,7 @@ async function resolveWallet(address: string): Promise<any | null> {
     // Tx history
     const hRes = await axios.get(
       `https://api.helius.xyz/v0/addresses/${address}/transactions`,
-      { params: { "api-key": process.env.HELIUS_API || "", limit: 50 } }
+      { params: { limit: 50 } }
     );
     const txs: any[] = hRes.data || [];
 
@@ -5301,3 +5329,5 @@ const FALLBACK_NEWS = [
   { id: 7, title: "Whale Alert: $240M USDT Moved From Binance to Unknown Wallet", source: "Whale Alert", snippet: "A transfer of 240,000,000 USDT from Binance was detected at block 19,842,100...", full: "A 240M USDT transfer from Binance was detected at block 19,842,100. Historical analysis of similar moves shows 60% correlation with upward price action within 48–72 hours. The receiving wallet has no prior history, consistent with cold storage.", tag: "USDT", time: "5 hr ago" },
   { id: 8, title: "Uniswap v4 Launch Confirmed — Hook Economy Expected to Explode", source: "Decrypt", snippet: "The Uniswap Foundation confirmed a Q2 mainnet launch for v4 with a hooks architecture...", full: "The Uniswap Foundation confirmed Q2 mainnet launch for v4 featuring a hooks architecture. Over 300 hook contracts are live on testnet. Analysts project $50–200M in annualised revenue for hook developers within 12 months.", tag: "UNI", time: "6 hr ago" },
 ];
+
+// Smart Helius key rotation — tries A first, falls back to B on 429
