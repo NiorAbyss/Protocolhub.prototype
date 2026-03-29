@@ -1436,7 +1436,7 @@ export default function ConnectPanel() {
   ], []);
 
   return (
-    <ConnectionProvider endpoint="https://solana-mainnet.g.alchemy.com/v2/demo">
+    <ConnectionProvider endpoint={import.meta.env.VITE_HELIUS_RPC || "https://api.mainnet-beta.solana.com"}>
       <WalletProvider wallets={wallets} autoConnect>
         <ConnectPanelInner />
       </WalletProvider>
