@@ -8,6 +8,7 @@ import { PhantomWalletAdapter } from '@solana/wallet-adapter-phantom';
 import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare';
 import { BackpackWalletAdapter } from '@solana/wallet-adapter-backpack';
 import { Transaction, PublicKey, Connection } from '@solana/web3.js';
+import { Buffer } from 'buffer';
 import { createTransferInstruction, getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
 /* ─── FONTS ─────────────────────────────────────────────────────────────── */
