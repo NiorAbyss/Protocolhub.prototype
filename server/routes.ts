@@ -949,7 +949,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   const helmet = (await import("helmet")).default;
   app.use((req: any, res: any, next: any) => {
     if (isSSE(req)) return next();
-    return helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false })(req, res, next);
+    return helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" } })(req, res, next);
   });
 
   // ── CORS (skip SSE — the route itself sets Access-Control-Allow-Origin: *) ─
