@@ -1,4 +1,4 @@
-// client/src/components/panels/ConnectPanel.tsx
+// client/src/components/hud/ConnectPanel.tsx
 // NFT access gate — shown to wallets with no active NFT
 // States: no_wallet | none | revoked | expired | grace | gate_open | active
 
@@ -8,6 +8,7 @@ import { PhantomWalletAdapter } from '@solana/wallet-adapter-phantom';
 import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare';
 import { BackpackWalletAdapter } from '@solana/wallet-adapter-backpack';
 import { Transaction, PublicKey, Connection } from '@solana/web3.js';
+import { createTransferInstruction, getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
 /* ─── FONTS ─────────────────────────────────────────────────────────────── */
 if (typeof document !== 'undefined') {
@@ -525,7 +526,6 @@ function MintPanel({
 
       // Step 3 — Build USDC transfer transaction on frontend
       const SolTx = Transaction;
-      const { createTransferInstruction, getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = await import('@solana/spl-token');
 
       const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
       const fromPubkey = new PublicKey(wallet);
