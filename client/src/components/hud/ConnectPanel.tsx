@@ -514,37 +514,41 @@ function MintPanel({
     setError(null);
 
     try {
-      // Step 1 — Backend builds a transaction containing:
-      //   • USDC SPL transfer  (user wallet → your treasury wallet)
-      //   • NFT lazy mint instruction (Candy Machine)
-      // It returns it serialised — it does NOT send it to chain.
-      const buildRes = await fetch('/api/nft/build-mint-tx', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, tier: selectedTier }),
-      });
-      const buildData = await buildRes.json();
+      // Step 1 — Get config (treasury wallet address)
+      const configRes = await fetch('/api/nft/config');
+      const config = await configRes.json();
+      if (!config.treasuryAddress) throw new Error('Treasury wallet not configured');
 
-      if (!buildData.transaction) {
-        throw new Error(buildData.error || 'Could not prepare transaction');
-      }
+      // Step 2 — Get price
+      const priceRes = await fetch('/api/nft/price');
+      const priceData = await priceRes.json();
 
-      // Step 2 — Deserialise the transaction the backend returned
-      const tx = Transaction.from(Buffer.from(buildData.transaction, 'base64'));
+      // Step 3 — Build USDC transfer transaction on frontend
+      const { PublicKey, Transaction: SolTx } = await import('@solana/web3.js');
+      const { createTransferInstruction, getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = await import('@solana/spl-token');
 
-      // Step 3 — Hand it to the wallet → THIS fires the confirm popup
-      // The popup shows:
-      //   • −$XX USDC  (to your treasury)
-      //   • −~0.005 SOL  (Solana gas fee)
-      //   • [Confirm] / [Reject]
+      const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+      const fromPubkey = new PublicKey(wallet);
+      const toPubkey = new PublicKey(config.treasuryAddress);
+      const amountLamports = Math.round(priceData.usdPrice * 1_000_000); // USDC has 6 decimals
+
+      const fromATA = await getAssociatedTokenAddress(USDC_MINT, fromPubkey);
+      const toATA = await getAssociatedTokenAddress(USDC_MINT, toPubkey);
+
+      const tx = new SolTx();
+      tx.add(createTransferInstruction(fromATA, toATA, fromPubkey, amountLamports, [], TOKEN_PROGRAM_ID));
+      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      tx.feePayer = fromPubkey;
+
+      // Step 4 — Send to wallet for signing
       setStep('signing');
       const sig = await sendTransaction(tx, connection);
 
-      // Step 4 — Wait for on-chain confirmation
+      // Step 5 — Wait for confirmation
       setStep('confirming');
       await connection.confirmTransaction(sig, 'confirmed');
 
-      // Step 5 — Notify backend to record the mint against this wallet
+      // Step 6 — Notify backend
       await fetch('/api/nft/confirm-mint', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
