@@ -1486,6 +1486,16 @@ function ConnectPanelInner() {
 
   useEffect(() => { loadPrice(); }, [loadPrice]);
 
+  // Restore wallet from sessionStorage after Phantom redirect on mobile
+  useEffect(() => {
+    const stored = sessionStorage.getItem('mintWallet');
+    if (stored && !wallet) setPhantomDirectWallet(stored);
+  }, []);
+
+  useEffect(() => {
+    if (wallet) sessionStorage.setItem('mintWallet', wallet);
+  }, [wallet]);
+
   useEffect(() => {
     if (wallet) checkAccess(wallet);
     else setAccess(null);
