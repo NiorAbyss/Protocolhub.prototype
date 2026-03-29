@@ -1436,7 +1436,7 @@ export default function ConnectPanel() {
   ], []);
 
   return (
-    <ConnectionProvider endpoint="https://api.mainnet-beta.solana.com">
+    <ConnectionProvider endpoint="https://solana-mainnet.g.alchemy.com/v2/demo">
       <WalletProvider wallets={wallets} autoConnect>
         <ConnectPanelInner />
       </WalletProvider>
