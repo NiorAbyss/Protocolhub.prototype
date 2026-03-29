@@ -7,7 +7,7 @@ import { ConnectionProvider, WalletProvider, useWallet, useConnection } from '@s
 import { PhantomWalletAdapter } from '@solana/wallet-adapter-phantom';
 import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare';
 import { BackpackWalletAdapter } from '@solana/wallet-adapter-backpack';
-import { Transaction } from '@solana/web3.js';
+import { Transaction, PublicKey, Connection } from '@solana/web3.js';
 
 /* ─── FONTS ─────────────────────────────────────────────────────────────── */
 if (typeof document !== 'undefined') {
@@ -524,7 +524,7 @@ function MintPanel({
       const priceData = await priceRes.json();
 
       // Step 3 — Build USDC transfer transaction on frontend
-      const { PublicKey, Transaction: SolTx } = await import('@solana/web3.js');
+      const SolTx = Transaction;
       const { createTransferInstruction, getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = await import('@solana/spl-token');
 
       const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
