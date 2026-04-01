@@ -537,6 +537,17 @@ function MintPanel({
       const toATA = await getAssociatedTokenAddress(USDC_MINT, toPubkey);
 
       const tx = new SolTx();
+
+      // Only add createATA instruction if treasury ATA doesn't exist yet
+      // This prevents extra signers that trigger Phantom's malicious warning
+      try {
+        const { getAccount } = await import('@solana/spl-token');
+        await getAccount(connection, toATA);
+      } catch {
+        const { createAssociatedTokenAccountInstruction } = await import('@solana/spl-token');
+        tx.add(createAssociatedTokenAccountInstruction(fromPubkey, toATA, toPubkey, USDC_MINT));
+      }
+
       tx.add(createTransferInstruction(fromATA, toATA, fromPubkey, amountLamports, [], TOKEN_PROGRAM_ID));
       tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
       tx.feePayer = fromPubkey;
