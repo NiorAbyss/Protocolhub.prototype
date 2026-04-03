@@ -8,6 +8,9 @@ const __dirname = path.dirname(__filename);
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: ['tweetnacl', 'bs58'],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "client", "src"),
