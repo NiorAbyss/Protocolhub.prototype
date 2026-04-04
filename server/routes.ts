@@ -478,8 +478,18 @@ function requireOwner(req: any, res: any, next: any) {
 /* CACHE HELPERS                                         */
 /* ===================================================== */
 
+import { Redis } from '@upstash/redis';
+
 interface CacheEntry { data: any; ts: number }
 const PANEL_CACHE = new Map<string, CacheEntry>();
+
+// Upstash Redis — used when env vars are set, falls back to in-memory
+const redis = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  ? new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN })
+  : null;
+
+if (redis) console.log('[CACHE] Upstash Redis connected');
+else console.log('[CACHE] Using in-memory cache');
 
 function getCached(key: string, ttlMs = 60_000): any | null {
   const entry = PANEL_CACHE.get(key);
@@ -490,6 +500,31 @@ function getCached(key: string, ttlMs = 60_000): any | null {
 
 function setCache(key: string, data: any): void {
   PANEL_CACHE.set(key, { data, ts: Date.now() });
+  // Also write to Redis async (non-blocking)
+  if (redis) {
+    redis.set(key, JSON.stringify({ data, ts: Date.now() }), { ex: 3600 })
+      .catch((e: any) => console.warn('[REDIS] setCache failed:', e.message));
+  }
+}
+
+async function getRedisCached(key: string, ttlMs = 60_000): Promise<any | null> {
+  // Check in-memory first (fastest)
+  const mem = PANEL_CACHE.get(key);
+  if (mem && Date.now() - mem.ts < ttlMs) return mem.data;
+  // Then check Redis
+  if (redis) {
+    try {
+      const val = await redis.get(key) as string | null;
+      if (val) {
+        const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+        if (parsed?.ts && Date.now() - parsed.ts < ttlMs) {
+          PANEL_CACHE.set(key, parsed); // warm in-memory
+          return parsed.data;
+        }
+      }
+    } catch (e: any) { console.warn('[REDIS] getCached failed:', e.message); }
+  }
+  return null;
 }
 
 function cacheAge(key: string): number {
@@ -2306,7 +2341,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Whale feed: Birdeye swaps — 30s cache
   app.get("/api/network/whales", async (_req: any, res: any) => {
     const key = "network:whales";
-    const hit  = getCached(key, 30_000);
+    const hit  = getCached(key, 120_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
     try {
       const data = await axios.get("https://public-api.birdeye.so/defi/txs/token", {
@@ -2346,7 +2381,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Gas: Helius priority fees — 15s cache
   app.get("/api/network/gas", async (_req: any, res: any) => {
     const key = "network:gas";
-    const hit  = getCached(key, 15_000);
+    const hit  = getCached(key, 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
     try {
       let recommended = 0, levels = { low: 0, medium: 5000, high: 15000, veryHigh: 30000 };
@@ -2378,7 +2413,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // INTEL: CoinGecko public (no key) + Alternative.me Fear & Greed — 3 min cache
   app.get("/api/network/intel", async (_req: any, res: any) => {
     const key = "network:intel";
-    const hit  = getCached(key, 3 * 60_000);
+    const hit  = getCached(key, 5 * 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
     try {
       const [marketsRes, globalRes, trendingRes, fngRes] = await Promise.allSettled([
@@ -2408,7 +2443,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // FLOWS: DexScreener public (no key) — 60s cache
   app.get("/api/network/flows", async (_req: any, res: any) => {
     const key = "network:flows";
-    const hit  = getCached(key, 60_000);
+    const hit  = getCached(key, 3 * 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
     try {
       const [solPairsRes, searchRes, boostedRes] = await Promise.allSettled([
@@ -2432,7 +2467,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // CHAIN: Helius RPC — TPS/epoch/fees at 30s, supply at 15 min (bundled at 30s)
   app.get("/api/network/chain", async (_req: any, res: any) => {
     const key = "network:chain";
-    const hit  = getCached(key, 30_000);
+    const hit  = getCached(key, 120_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
 
     // Try QuickNode first, fall back to public RPC
@@ -2731,7 +2766,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     // No search — load top pairs by volume from Solana + ETH (cached 60s)
     const key = "explore:pairs:all";
-    const hit  = getCached(key, 60_000);
+    const hit  = getCached(key, 3 * 60_000);
     let allPairs: any[];
     if (hit) {
       allPairs = hit.pairs;
@@ -2767,7 +2802,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/explore/yields", async (req: any, res: any) => {
     const { page = "1", limit = "10", q = "" } = req.query;
     const key = "explore:yields:all";
-    const hit  = getCached(key, 60_000);
+    const hit  = getCached(key, 5 * 60_000);
     let allPools: any[];
     if (hit) {
       allPools = hit.pools;
@@ -2793,7 +2828,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/explore/gainers", async (req: any, res: any) => {
     const { page = "1", limit = "10", mode = "gainers", q = "" } = req.query;
     const key = "explore:gainers:all";
-    const hit  = getCached(key, 60_000);
+    const hit  = getCached(key, 3 * 60_000);
     let gainers: any[], losers: any[];
     if (hit) { gainers = hit.gainers; losers = hit.losers; }
     else {
@@ -2886,7 +2921,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/protocol/whale-tracker", async (_req: any, res: any) => {
     const key = "protocol:whales";
-    const hit  = getCached(key, 30_000);
+    const hit  = getCached(key, 120_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
     try {
       let rawItems: any[] = [];
@@ -3045,7 +3080,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   /* =================================================== */
   app.get("/api/protocol/market-hype", async (_req: any, res: any) => {
     const key = "protocol:market-hype";
-    const hit  = getCached(key, 5 * 60_000);
+    const hit  = getCached(key, 15 * 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
     try {
       const [cgTrending, cgMarkets, dsRes] = await Promise.allSettled([
@@ -3163,7 +3198,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── 1. Sector Rotation Heatmap — DeFiLlama protocol categories ──────────
   app.get("/api/network/capital/sector-rotation", apiLimiter, async (_req: any, res: any) => {
     const key = "capital:sector-rotation";
-    const hit  = getCached(key, 5 * 60_000);
+    const hit  = getCached(key, 15 * 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
     try {
       const r = await axios.get("https://api.llama.fi/protocols", { timeout: 10000 });
@@ -3223,7 +3258,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── 2. Smart Money Destination — top protocols by recent inflow ──────────
   app.get("/api/network/capital/smart-money", apiLimiter, async (_req: any, res: any) => {
     const key = "capital:smart-money";
-    const hit  = getCached(key, 5 * 60_000);
+    const hit  = getCached(key, 15 * 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
     try {
       const r = await axios.get("https://api.llama.fi/protocols", { timeout: 10000 });
@@ -3850,7 +3885,7 @@ Analyse each token based on the platform data context. The spotlight token shoul
   app.get("/api/explore/news", async (req: any, res: any) => {
     const { page = "1", limit = "12" } = req.query;
     const key = "explore:news:v2";
-    const hit  = getCached(key, 10 * 60_000);
+    const hit  = getCached(key, 20 * 60_000);
     let allNews: any[];
 
     if (hit) {
@@ -4117,7 +4152,7 @@ Analyse each token based on the platform data context. The spotlight token shoul
 
   app.get("/api/explore/narrative", async (_req: any, res: any) => {
     const key = "explore:narrative";
-    const hit  = getCached(key, 3 * 60_000);
+    const hit  = getCached(key, 10 * 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
 
     const BASKETS: Record<string, { label: string; emoji: string; ids: string[] }> = {
@@ -4214,7 +4249,7 @@ Analyse each token based on the platform data context. The spotlight token shoul
 
   app.get("/api/explore/alpha-feed", async (_req: any, res: any) => {
     const key = "explore:alpha-feed";
-    const hit  = getCached(key, 60_000);
+    const hit  = getCached(key, 5 * 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
 
     try {
@@ -4341,7 +4376,7 @@ Analyse each token based on the platform data context. The spotlight token shoul
 
   app.get("/api/explore/smart-money", async (_req: any, res: any) => {
     const key = "explore:smart-money";
-    const hit  = getCached(key, 30_000);
+    const hit  = getCached(key, 5 * 60_000);
     if (hit) return res.json({ ...hit, cached: true, age: cacheAge(key) });
 
     // Pull from existing whale tracker cache or refresh it
