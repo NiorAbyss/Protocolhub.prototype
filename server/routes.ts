@@ -5066,6 +5066,22 @@ Analyse each token based on the platform data context. The spotlight token shoul
   });
 
   // ── GET /api/sync/requests — list all sync requests (owner sees all, admin sees own) ──
+
+  // ── RPC Proxy ─────────────────────────────────────────────────────────────
+  app.post('/api/rpc', async (req: any, res: any) => {
+    try {
+      const heliusKey = process.env.HELIUS_API_B || process.env.HELIUS_API || '';
+      const response = await axios.post(
+        `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`,
+        req.body,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+      res.json(response.data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'RPC proxy error' });
+    }
+  });
+
   app.get("/api/sync/requests", requireAdmin, (req: any, res: any) => {
     const session = (req as any).adminSession;
     const isOwner = session?.role === "owner";

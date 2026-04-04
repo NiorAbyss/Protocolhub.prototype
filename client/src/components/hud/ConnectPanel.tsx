@@ -1,5 +1,6 @@
 // client/src/components/hud/ConnectPanel.tsx
-// NFT access gate — full deep-link + mint flow with state persistence
+// NFT access gate — shown to wallets with no active NFT
+// States: no_wallet | none | revoked | expired | grace | gate_open | active
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ConnectionProvider, WalletProvider, useWallet, useConnection } from '@solana/wallet-adapter-react';
@@ -7,10 +8,9 @@ import { PhantomWalletAdapter } from '@solana/wallet-adapter-phantom';
 import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare';
 import { BackpackWalletAdapter } from '@solana/wallet-adapter-backpack';
 import { Transaction, PublicKey, Connection } from '@solana/web3.js';
-import { Buffer } from 'buffer';
 import { createTransferInstruction, getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
-/* ─── FONTS ────────────────────────────────────────────────────────────── */
+/* ─── FONTS ─────────────────────────────────────────────────────────────── */
 if (typeof document !== 'undefined') {
   const existing = document.getElementById('con-kf');
   if (existing) existing.remove();
@@ -24,7 +24,7 @@ if (typeof document !== 'undefined') {
     @keyframes conFade    { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
     @keyframes conIn      { from { opacity:0; } to { opacity:1; } }
     @keyframes conUp      { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
-    @keyframes conScan    { 0% { top:0; opacity:1; } 100% { top:100%; opacity:0; } }
+6    @keyframes conScan    { 0% { top:0; opacity:1; } 100% { top:100%; opacity:0; } }
     @keyframes conBlink   { 0%,49% { opacity:1; } 50%,100% { opacity:0; } }
     @keyframes conShake   { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-3px)} 40%{transform:translateX(3px)} 60%{transform:translateX(-2px)} 80%{transform:translateX(2px)} }
   `;
@@ -64,10 +64,9 @@ async function cachedFetch<T>(key: string, fetcher: () => Promise<T>, ttlSeconds
   return data;
 }
 
-/* ─── TYPES ────────────────────────────────────────────────────────────── */
+/* ─── TYPES ──────────────────────────────────────────────────────────────── */
 type AccessStatus = 'checking' | 'no_wallet' | 'none' | 'revoked' | 'expired' | 'grace' | 'gate_open' | 'active';
 type Tier = 'bronze' | 'silver' | 'gold';
-type MintStep = 'idle' | 'building' | 'signing' | 'confirming' | 'done';
 
 interface AccessInfo {
   hasAccess:    boolean;
@@ -99,15 +98,7 @@ interface PriceInfo {
   isEarlyPrice: boolean;
 }
 
-interface MintState {
-  step: MintStep;
-  selectedTier: Tier;
-  txSig: string | null;
-  error: string | null;
-  timestamp: number;
-}
-
-/* ─── UTILS ────────────────────────────────────────────────────────────── */
+/* ─── UTILS ──────────────────────────────────────────────────────────────── */
 function fmtSol(n: number): string {
   return n < 0.001 ? n.toFixed(6) : n < 1 ? n.toFixed(4) : n.toFixed(3);
 }
@@ -124,35 +115,6 @@ function timeAgo(iso: string): string {
 
 function pct(minted: number, supply = 2000): number {
   return Math.min(100, Math.round((minted / supply) * 100));
-}
-
-/* ─── STORAGE HELPERS ────────────────────────────────────────────────────── */
-function saveMintState(wallet: string, state: Partial<MintState>) {
-  const key = `mint_state_${wallet}`;
-  const current = loadMintState(wallet) || { step: 'idle', selectedTier: 'bronze', txSig: null, error: null, timestamp: Date.now() };
-  const updated = { ...current, ...state, timestamp: Date.now() };
-  sessionStorage.setItem(key, JSON.stringify(updated));
-}
-
-function loadMintState(wallet: string): MintState | null {
-  const key = `mint_state_${wallet}`;
-  const stored = sessionStorage.getItem(key);
-  if (!stored) return null;
-  try {
-    const state = JSON.parse(stored);
-    // Clear if older than 30 minutes
-    if (Date.now() - state.timestamp > 30 * 60 * 1000) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
-    return state;
-  } catch {
-    return null;
-  }
-}
-
-function clearMintState(wallet: string) {
-  sessionStorage.removeItem(`mint_state_${wallet}`);
 }
 
 /* ─── SMALL COMPONENTS ───────────────────────────────────────────────────── */
@@ -197,7 +159,7 @@ function TierBadge({ tier }: { tier: Tier }) {
     bronze: { color: C.orange,  label: 'BRONZE', icon: '◈' },
     silver: { color: '#aaccff', label: 'SILVER', icon: '◈' },
     gold:   { color: C.yellow,  label: 'GOLD',   icon: '★' },
-  }[tier] ?? { color: C.orange, label: "BRONZE", icon: "◈" };
+  }[tier] ?? { color: C.orange, label: "BRONZE", icon: "◈", desc: "Full platform access · 30-day renewal" };
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -224,7 +186,7 @@ function ScanLine() {
   );
 }
 
-/* ─── TIER CARD ───────────────────────────────────────────────────────────── */
+/* ─── TIER CARD ──────────────────────────────────────────────────────────── */
 function TierCard({
   tier, price, solPrice, solUsd, minted, supply, locked, comingSoon, selected, onSelect,
 }: {
@@ -236,7 +198,7 @@ function TierCard({
     bronze: { color: C.orange,  icon: '◈', desc: 'Full platform access · 30-day renewal' },
     silver: { color: '#aaccff', icon: '◇', desc: 'Enhanced features · Priority data feeds' },
     gold:   { color: C.yellow,  icon: '★', desc: 'All features · Exclusive alpha channels' },
-  }[tier];
+  }[tier] ?? { color: C.orange, label: "BRONZE", icon: "◈", desc: "Full platform access · 30-day renewal" };
 
   const progress = minted !== undefined && supply !== undefined ? pct(minted, supply) : null;
 
@@ -256,6 +218,7 @@ function TierCard({
     >
       {selected && <ScanLine />}
 
+      {/* Tier header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 9, color: C.faint, letterSpacing: 3, marginBottom: 4 }}>{cfg.icon} TIER</div>
@@ -284,6 +247,7 @@ function TierCard({
         )}
       </div>
 
+      {/* Price — shows USDC label */}
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: comingSoon ? C.faint : C.text, fontFamily: FM }}>
           {comingSoon ? '—' : `$${price}`}
@@ -293,12 +257,17 @@ function TierCard({
             USDC · Solana
           </div>
         )}
+        {comingSoon && (
+          <div style={{ fontSize: 9, color: C.faint, marginTop: 2 }}>Price TBA</div>
+        )}
       </div>
 
+      {/* Description */}
       <div style={{ fontSize: 9, color: C.dim, lineHeight: 1.6, marginBottom: 14, fontFamily: FM }}>
         {cfg.desc}
       </div>
 
+      {/* Supply bar for bronze */}
       {progress !== null && !comingSoon && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -374,7 +343,7 @@ function NoWalletState({ onConnect }: { onConnect: () => void }) {
   );
 }
 
-/* ─── STATE: REVOKED ────────���────────────────────────────────────────────── */
+/* ─── STATE: REVOKED ─────────────────────────────────────────────────────── */
 function RevokedState({ info }: { info: AccessInfo }) {
   return (
     <div style={{
@@ -432,7 +401,7 @@ function RevokedState({ info }: { info: AccessInfo }) {
             If you believe this was a mistake, you can file an appeal
           </div>
           <a
-            href={`mailto:${info.appealEmail}?subject=Access Appeal — Serial: ${info.serial || 'N/A'}`}
+            href={`mailto:${info.appealEmail}?subject=Access Appeal — Serial: ${info.serial || 'N/A'}&body=Serial: ${info.serial || 'N/A'}%0AReason: ${info.reason || 'N/A'}%0A%0AYour message here...`}
             style={{
               fontFamily: FM, fontSize: 10, letterSpacing: 2,
               color: C.cyan, background: C.cyanFaint,
@@ -450,8 +419,8 @@ function RevokedState({ info }: { info: AccessInfo }) {
 }
 
 /* ─── STATE: GRACE PERIOD ────────────────────────────────────────────────── */
-function GraceState({ info, price, onMint }: {
-  info: AccessInfo; price?: PriceInfo; onMint: () => void;
+function GraceState({ info, price, solPrice, solUsd, onMint }: {
+  info: AccessInfo; price?: PriceInfo; solPrice?: number; solUsd?: number; onMint: () => void;
 }) {
   return (
     <div style={{
@@ -520,179 +489,100 @@ function GraceState({ info, price, onMint }: {
   );
 }
 
-/* ─── MINT PANEL (FIXED & COMPLETE) ──────────────────────────────────────── */
+/* ─── MINT PANEL ─────────────────────────────────────────────────────────── */
+// ↓↓↓ CHANGED: uses sendTransaction from wallet adapter so wallet popup fires
+// ↓↓↓ USDC is debited immediately on confirm — goes straight to treasury wallet
+// ↓↓↓ Backend builds the tx, frontend signs+sends, user pays USDC + gas in one popup
+type MintStep = 'idle' | 'building' | 'signing' | 'confirming' | 'done';
+
 function MintPanel({
   wallet, price, onSuccess,
 }: {
   wallet: string; price: PriceInfo; onSuccess: () => void;
 }) {
   const { sendTransaction } = useWallet();
-  const { connection } = useConnection();
+  const { connection }      = useConnection();
 
-  // Load persisted mint state
-  const savedState = useMemo(() => loadMintState(wallet), [wallet]);
-  const [selectedTier, setSelectedTier] = useState<Tier>(savedState?.selectedTier || 'bronze');
-  const [step, setStep] = useState<MintStep>(savedState?.step || 'idle');
-  const [error, setError] = useState<string | null>(null);
-  const [txSig, setTxSig] = useState<string | null>(savedState?.txSig || null);
+  const [selectedTier, setSelectedTier] = useState<Tier>('bronze');
+  const [step,         setStep]         = useState<MintStep>('idle');
+  const [error,        setError]        = useState<string | null>(null);
+  const [txSig,        setTxSig]        = useState<string | null>(null);
 
   const isBusy = step !== 'idle' && step !== 'done';
-
-  // Persist state on changes
-  useEffect(() => {
-    saveMintState(wallet, { step, selectedTier, txSig, error: error || '' });
-  }, [wallet, step, selectedTier, txSig, error]);
 
   async function handleMint() {
     setStep('building');
     setError(null);
 
     try {
-      // ═══════════════════════════════════════════════════════════════════════
-      // STEP 1: Get config from backend
-      // ═══════════════════════════════════════════════════════════════════════
+      // Step 1 — Get config (treasury wallet address)
       const configRes = await fetch('/api/nft/config');
-      if (!configRes.ok) throw new Error('Failed to fetch config');
       const config = await configRes.json();
-      if (!config.treasuryAddress) throw new Error('Treasury wallet not configured on backend');
+      if (!config.treasuryAddress) throw new Error('Treasury wallet not configured');
 
-      // ═══════════════════════════════════════════════════════════════════════
-      // STEP 2: Get current price (verify freshness)
-      // ═══════════════════════════════════════════════════════════════════════
+      // Step 2 — Get price
       const priceRes = await fetch('/api/nft/price');
-      if (!priceRes.ok) throw new Error('Failed to fetch current price');
-      const priceData: PriceInfo = await priceRes.json();
+      const priceData = await priceRes.json();
 
-      // ═══════════════════════════════════════════════════════════════════════
-      // STEP 3: Build transaction on frontend
-      // ═══════════════════════════════════════════════════════════════════════
+      // Step 3 — Build USDC transfer transaction on frontend
+      const SolTx = Transaction;
+      
+
       const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
       const fromPubkey = new PublicKey(wallet);
       const toPubkey = new PublicKey(config.treasuryAddress);
-      
-      // USDC has 6 decimals
-      const amountLamports = Math.round(priceData.usdPrice * 1_000_000);
+      const amountLamports = Math.round(priceData.usdPrice * 1_000_000); // USDC has 6 decimals
 
-      // Get Associated Token Accounts
       const fromATA = await getAssociatedTokenAddress(USDC_MINT, fromPubkey);
       const toATA = await getAssociatedTokenAddress(USDC_MINT, toPubkey);
 
-      const tx = new Transaction();
+      const tx = new SolTx();
+      tx.add(createTransferInstruction(fromATA, toATA, fromPubkey, amountLamports, [], TOKEN_PROGRAM_ID));
+        tx.feePayer = fromPubkey;
 
-      // ─────────────────────────────────────────────────────────────────────
-      // Only create treasury ATA if it doesn't exist
-      // This prevents Phantom from showing "malicious contract" warning
-      // ─────────────────────────────────────────────────────────────────────
-      try {
-        const { getAccount } = await import('@solana/spl-token');
-        await getAccount(connection, toATA);
-        // ATA exists, skip creation instruction
-      } catch {
-        // ATA doesn't exist, create it
-        const { createAssociatedTokenAccountInstruction } = await import('@solana/spl-token');
-        tx.add(createAssociatedTokenAccountInstruction(fromPubkey, toATA, toPubkey, USDC_MINT));
-      }
+        // Step 4 — Fetch fresh blockhash right before signing
+        setStep('signing');
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
+        tx.recentBlockhash = blockhash;
+        const sig = await sendTransaction(tx, connection, { maxRetries: 3 });
 
-      // Add USDC transfer instruction
-      tx.add(createTransferInstruction(
-        fromATA,
-        toATA,
-        fromPubkey,
-        amountLamports,
-        [],
-        TOKEN_PROGRAM_ID
-      ));
+        // Step 5 — Wait for confirmation
+        setStep('confirming');
+        await connection.confirmTransaction({
+          signature: sig,
+          blockhash,
+          lastValidBlockHeight,
+        }, 'confirmed');
 
-      // Set recent blockhash and fee payer
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-      tx.feePayer = fromPubkey;
-
-      // ═══════════════════════════════════════════════���═══════════════════════
-      // STEP 4: Request user signature (triggers wallet popup)
-      // ═══════════════════════════════════════════════════════════════════════
-      setStep('signing');
-      const sig = await sendTransaction(tx, connection);
-
-      // ═══════════════════════════════════════════════════════════════════════
-      // STEP 5: Wait for on-chain confirmation
-      // ═══════════════════════════════════════════════════════════════════════
-      setStep('confirming');
-      const confirmation = await connection.confirmTransaction(sig, 'confirmed');
-      
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${confirmation.value.err.toString()}`);
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════
-      // STEP 6: Notify backend of successful mint
-      // Backend verifies on-chain NFT ownership and grants access
-      // ═══════════════════════════════════════════════════════════════════════
-      const confirmRes = await fetch('/api/nft/confirm-mint', {
+      // Step 6 — Notify backend
+      await fetch('/api/nft/confirm-mint', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet,
-          txSig: sig,
-          tier: selectedTier,
-          amount: priceData.usdPrice,
-        }),
+        body: JSON.stringify({ wallet, txSig: sig, tier: selectedTier }),
       });
 
-      if (!confirmRes.ok) {
-        throw new Error('Backend failed to confirm mint');
-      }
-
-      const confirmData = await confirmRes.json();
-      if (!confirmData.success) {
-        throw new Error(confirmData.error || 'Mint confirmation failed');
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════
-      // SUCCESS: Clear state & trigger refresh
-      // ═══════════════════════════════════════════════════════════════════════
       setTxSig(sig);
       setStep('done');
-      clearMintState(wallet);
       onSuccess();
 
     } catch (err: any) {
-      // ─────────────────────────────────────────────────────────────────────
-      // ERROR HANDLING
-      // ─────────────────────────────────────────────────────────────────────
-      let errorMsg = 'Something went wrong — please try again.';
-
-      // User rejected in wallet
+      // User clicked Reject in wallet
       if (
         err?.message?.toLowerCase().includes('user rejected') ||
         err?.message?.toLowerCase().includes('rejected the request') ||
-        err?.message?.toLowerCase().includes('user did not approve') ||
         err?.code === 4001
       ) {
-        errorMsg = 'Transaction cancelled — you rejected it in your wallet.';
+        setError('Transaction cancelled — you rejected it in your wallet.');
+      } else if (err?.message?.toLowerCase().includes('insufficient')) {
+        setError('Insufficient USDC balance. Top up your wallet and try again.');
+      } else {
+        setError(err?.message || 'Something went wrong — please try again.');
       }
-      // Insufficient balance
-      else if (err?.message?.toLowerCase().includes('insufficient')) {
-        errorMsg = 'Insufficient USDC balance or SOL for fees. Top up and try again.';
-      }
-      // Network errors
-      else if (err?.message?.toLowerCase().includes('network') || err?.message?.toLowerCase().includes('timeout')) {
-        errorMsg = 'Network error — check your connection and try again.';
-      }
-      // ATA creation issues
-      else if (err?.message?.toLowerCase().includes('ata')) {
-        errorMsg = 'Token account issue — ensure you have USDC on Solana.';
-      }
-      // Fallback
-      else {
-        errorMsg = err?.message || errorMsg;
-      }
-
-      setError(errorMsg);
       setStep('idle');
     }
   }
 
-  // ─── Success screen ────────────────────────────────────────────────────
+  // ── Success screen ──────────────────────────────────────────────────────
   if (step === 'done' && txSig) {
     return (
       <div style={{
@@ -718,7 +608,7 @@ function MintPanel({
     );
   }
 
-  // ─── Mint UI ────────────────────────────────────────────────────────────
+  // ── Mint UI ─────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, animation: 'conFade 0.4s ease both' }}>
 
@@ -731,13 +621,15 @@ function MintPanel({
           <TierCard
             tier="bronze"
             price={price.usdPrice}
+            solPrice={price.solPrice}
+            solUsd={price.solUsd}
             minted={price.minted}
             supply={2000}
             selected={selectedTier === 'bronze'}
             onSelect={() => setSelectedTier('bronze')}
           />
           <TierCard tier="silver" price={0} comingSoon />
-          <TierCard tier="gold" price={0} comingSoon />
+          <TierCard tier="gold"   price={0} comingSoon />
         </div>
       </div>
 
@@ -785,7 +677,7 @@ function MintPanel({
           <TierBadge tier={selectedTier} />
         </div>
 
-        {/* Step indicator */}
+        {/* Step indicator — shown while transaction is in progress */}
         {isBusy && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
@@ -794,8 +686,8 @@ function MintPanel({
             fontSize: 9, color: C.cyan, fontFamily: FM, letterSpacing: 1,
           }}>
             <Spinner size={10} />
-            {step === 'building' && 'Building your transaction...'}
-            {step === 'signing' && 'Approve the transaction in your wallet'}
+            {step === 'building'   && 'Building your transaction...'}
+            {step === 'signing'    && 'Approve the transaction in your wallet'}
             {step === 'confirming' && 'Confirming on Solana...'}
           </div>
         )}
@@ -839,21 +731,22 @@ function MintPanel({
   );
 }
 
+
 /* ─── POINTS CARD ────────────────────────────────────────────────────────── */
 function PointsCard({ wallet, access, onRedeemSuccess }: {
   wallet: string;
   access: AccessInfo;
   onRedeemSuccess: () => void;
 }) {
-  const balance = access.pointsBalance ?? 0;
-  const total = access.pointsTotal ?? 0;
+  const balance    = access.pointsBalance ?? 0;
+  const total      = access.pointsTotal   ?? 0;
   const [redeeming, setRedeeming] = useState<'month' | 'page' | null>(null);
-  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [msg,       setMsg]       = useState<{ text: string; ok: boolean } | null>(null);
 
   async function redeemMonth() {
     setRedeeming('month'); setMsg(null);
     try {
-      const r = await fetch('/api/points/redeem-month', {
+      const r    = await fetch('/api/points/redeem-month', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet }),
       });
@@ -871,7 +764,7 @@ function PointsCard({ wallet, access, onRedeemSuccess }: {
   async function redeemPage() {
     setRedeeming('page'); setMsg(null);
     try {
-      const r = await fetch('/api/points/burn-page-access', {
+      const r    = await fetch('/api/points/burn-page-access', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet, page: 'sniper' }),
       });
@@ -887,7 +780,7 @@ function PointsCard({ wallet, access, onRedeemSuccess }: {
   }
 
   const canMonth = balance >= 500;
-  const canPage = balance >= 50;
+  const canPage  = balance >= 50;
 
   return (
     <div style={{
@@ -895,6 +788,7 @@ function PointsCard({ wallet, access, onRedeemSuccess }: {
       background: C.bgCard, marginBottom: 16, overflow: 'hidden',
       animation: 'conFade 0.4s ease both',
     }}>
+      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
@@ -914,6 +808,7 @@ function PointsCard({ wallet, access, onRedeemSuccess }: {
         </div>
       </div>
 
+      {/* Progress toward free month */}
       <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
           <span style={{ fontSize: 8, color: C.faint, letterSpacing: 1 }}>FREE MONTH PROGRESS</span>
@@ -937,6 +832,7 @@ function PointsCard({ wallet, access, onRedeemSuccess }: {
         )}
       </div>
 
+      {/* Redeem buttons */}
       <div style={{ padding: '12px 16px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button
           onClick={redeemMonth}
@@ -986,11 +882,11 @@ function PointsCard({ wallet, access, onRedeemSuccess }: {
   );
 }
 
-/* ─── ACTIVE VIEW ───────────────────────────────────────────────────────── */
+/* ─── ACTIVE VIEW (tabbed — status + history) ───────────────────────────── */
 function ActiveView({ access, wallet, onDisconnect }: {
   access: AccessInfo; wallet: string; onDisconnect: () => void;
 }) {
-  const [tab, setTab] = useState<'status' | 'history'>('status');
+  const [tab,     setTab]     = useState<'status' | 'history'>('status');
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -1005,19 +901,18 @@ function ActiveView({ access, wallet, onDisconnect }: {
   }, [tab, wallet]);
 
   const eventColor = (e: string) => {
-    if (e === 'MINT') return C.cyan;
-    if (e === 'RENEW') return C.green;
-    if (e === 'REVOKE') return C.red;
-    if (e === 'CLAIM') return C.orange;
+    if (e === 'MINT')    return C.cyan;
+    if (e === 'RENEW')   return C.green;
+    if (e === 'REVOKE')  return C.red;
+    if (e === 'CLAIM')   return C.orange;
     if (e === 'RESTORE') return C.purple;
     return C.dim;
   };
-
   const eventIcon = (e: string) => {
-    if (e === 'MINT') return '◈';
-    if (e === 'RENEW') return '↻';
-    if (e === 'REVOKE') return '⚑';
-    if (e === 'CLAIM') return '⬡';
+    if (e === 'MINT')    return '◈';
+    if (e === 'RENEW')   return '↻';
+    if (e === 'REVOKE')  return '⚑';
+    if (e === 'CLAIM')   return '⬡';
     if (e === 'RESTORE') return '✓';
     return '▸';
   };
@@ -1094,7 +989,7 @@ function ActiveView({ access, wallet, onDisconnect }: {
 
       <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, marginBottom: 20 }}>
         {([
-          { id: 'status', label: '◈ MY NFT' },
+          { id: 'status',  label: '◈ MY NFT' },
           { id: 'history', label: '▸ HISTORY' },
         ] as const).map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
@@ -1110,13 +1005,13 @@ function ActiveView({ access, wallet, onDisconnect }: {
       {tab === 'status' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, animation: 'conFade 0.3s ease' }}>
           {[
-            { label: 'WALLET', value: wallet },
-            { label: 'TIER', value: (access.tier ?? 'bronze').toUpperCase() },
-            { label: 'MINT ADDRESS', value: access.mintAddress ?? '—' },
-            { label: 'EXPIRES', value: access.expiresAt ? new Date(access.expiresAt).toLocaleDateString() : '—' },
+            { label: 'WALLET',         value: wallet },
+            { label: 'TIER',           value: (access.tier ?? 'bronze').toUpperCase() },
+            { label: 'MINT ADDRESS',   value: access.mintAddress ?? '—' },
+            { label: 'EXPIRES',        value: access.expiresAt ? new Date(access.expiresAt).toLocaleDateString() : '—' },
             { label: 'DAYS REMAINING', value: access.daysLeft != null ? `${access.daysLeft} days` : '—' },
             { label: 'ORIGINAL PRICE', value: access.originalPrice != null ? `$${access.originalPrice} USDC` : '—' },
-            { label: 'SOURCE', value: (access.source ?? 'nft').toUpperCase() },
+            { label: 'SOURCE',         value: (access.source ?? 'nft').toUpperCase() },
           ].map((row, i) => (
             <div key={i} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -1204,10 +1099,8 @@ function ActiveView({ access, wallet, onDisconnect }: {
                     {entry.tx_sig && (
                       <a href={`https://solscan.io/tx/${entry.tx_sig}`}
                         target="_blank" rel="noopener noreferrer"
-                        style={{
-                          fontSize: 8, color: C.cyanDim, fontFamily: FM,
-                          display: 'inline-block', marginTop: 4, textDecoration: 'none', letterSpacing: 1
-                        }}>
+                        style={{ fontSize: 8, color: C.cyanDim, fontFamily: FM,
+                          display: 'inline-block', marginTop: 4, textDecoration: 'none', letterSpacing: 1 }}>
                         {entry.tx_sig.slice(0, 14)}... ↗
                       </a>
                     )}
@@ -1222,30 +1115,37 @@ function ActiveView({ access, wallet, onDisconnect }: {
   );
 }
 
+
 /* ─── DETECT MOBILE ─────────────────────────────────────────────────────── */
 const isMobile = typeof navigator !== 'undefined' &&
   /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-/* ─── WALLET CONFIG ────────────────────────────────────────────────────── */
+/* ─── WALLET CONFIG ──────────────────────────────────────────────────────── */
 const WALLETS = [
   {
     name: 'Phantom',
     icon: 'https://raw.githubusercontent.com/solana-labs/wallet-adapter/master/packages/wallets/phantom/icon.png',
     adapter: 'phantom',
+    deepLink: (url: string) => `https://phantom.app/ul/browse/${encodeURIComponent(url)}?ref=${encodeURIComponent(window.location.origin)}`,
+    installUrl: 'https://phantom.app',
   },
   {
     name: 'Solflare',
     icon: 'https://raw.githubusercontent.com/solana-labs/wallet-adapter/master/packages/wallets/solflare/icon.svg',
     adapter: 'solflare',
+    deepLink: (url: string) => `https://solflare.com/ul/v1/browse/${encodeURIComponent(url)}?ref=${encodeURIComponent(window.location.origin)}`,
+    installUrl: 'https://solflare.com',
   },
   {
     name: 'Backpack',
     icon: 'https://raw.githubusercontent.com/solana-labs/wallet-adapter/master/packages/wallets/backpack/icon.png',
     adapter: 'backpack',
+    deepLink: (url: string) => `https://backpack.app/browse/${encodeURIComponent(url)}`,
+    installUrl: 'https://backpack.app',
   },
 ];
 
-/* ─── WALLET BUTTON ─────────────────────────────────────────────────────── */
+/* ─── WALLET BUTTON (header) ─────────────────────────────────────────────── */
 function WalletButton({ onOpen }: { onOpen: () => void }) {
   const { wallet, publicKey, disconnect, connecting } = useWallet();
   const address = publicKey?.toBase58();
@@ -1302,25 +1202,44 @@ function WalletButton({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-/* ─── WALLET SELECTOR MODAL ────────────────────────────────────────────── */
+/* ─── WALLET SELECTOR MODAL ──────────────────────────────────────────────── */
 function WalletSelectorModal({ onClose, onSelected }: { onClose: () => void; onSelected: () => void }) {
-  const { select, wallets, connecting, wallet: activeWallet } = useWallet();
+  const { select, wallets, connecting, wallet: activeWallet, disconnect } = useWallet();
   const [selected, setSelected] = useState<string | null>(null);
+  const [solflareExpanded, setSolflareExpanded] = useState(false);
 
   function handleSelect(w: typeof WALLETS[0]) {
-    const adapter = wallets.find(a => a.adapter.name.toLowerCase() === w.name.toLowerCase());
-    if (adapter) {
-      setSelected(w.name);
-      select(adapter.adapter.name as any);
-      onSelected();
-    } else if (isMobile) {
-      // On mobile, open wallet in its app
-      window.location.href = `https://${w.name.toLowerCase()}.app`;
+    const encodedUrl    = encodeURIComponent(window.location.href);
+    const encodedOrigin = encodeURIComponent(window.location.origin);
+
+    if (w.name === 'Phantom') {
+      if ((window as any).phantom?.solana) {
+        const adapter = wallets.find(a => a.adapter.name.toLowerCase() === 'phantom');
+        if (adapter) { setSelected(w.name); select(adapter.adapter.name as any); onSelected(); }
+        return;
+      }
+      window.location.href = `https://phantom.app/ul/browse/${encodedUrl}?ref=${encodedOrigin}`;
+      return;
     }
+
+    if (w.name === 'Backpack') {
+      if ((window as any).backpack?.solana) {
+        const adapter = wallets.find(a => a.adapter.name.toLowerCase() === 'backpack');
+        if (adapter) { setSelected(w.name); select(adapter.adapter.name as any); onSelected(); }
+        return;
+      }
+      window.location.href = `https://backpack.app/browse/${encodedUrl}`;
+      return;
+    }
+
+    const adapter = wallets.find(a => a.adapter.name.toLowerCase() === w.name.toLowerCase());
+    if (adapter) { setSelected(w.name); select(adapter.adapter.name as any); onSelected(); }
+    else window.open(w.installUrl, '_blank');
   }
 
   function handleBack() {
-    setSelected(null);
+    if (selected) { disconnect(); setSelected(null); }
+    else onClose();
   }
 
   return (
@@ -1353,6 +1272,11 @@ function WalletSelectorModal({ onClose, onSelected }: { onClose: () => void; onS
               <div style={{ fontSize: 11, letterSpacing: 3, color: C.text, fontWeight: 700 }}>
                 {selected ? `CONNECTING TO ${selected.toUpperCase()}` : 'SELECT WALLET'}
               </div>
+              {isMobile && !selected && (
+                <div style={{ fontSize: 8, color: C.faint, marginTop: 3, letterSpacing: 1 }}>
+                  Opens wallet app on mobile
+                </div>
+              )}
             </div>
           </div>
           <button onClick={onClose}
@@ -1371,38 +1295,136 @@ function WalletSelectorModal({ onClose, onSelected }: { onClose: () => void; onS
             <div style={{ fontSize: 10, color: C.dim, letterSpacing: 2 }}>
               Waiting for {selected}...
             </div>
+            <div style={{ fontSize: 9, color: C.faint, marginTop: 8 }}>
+              {isMobile ? 'Check your wallet app' : 'Approve in your wallet extension'}
+            </div>
+            <button onClick={handleBack}
+              style={{
+                marginTop: 20, fontFamily: FM, fontSize: 9, letterSpacing: 2,
+                color: C.dim, background: 'transparent',
+                border: `1px solid ${C.border}`, borderRadius: 4,
+                padding: '8px 20px', cursor: 'pointer',
+              }}>← CHOOSE DIFFERENT WALLET</button>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {WALLETS.map((w) => (
-              <button key={w.name} onClick={() => handleSelect(w)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 14,
-                  padding: '14px 16px', background: 'rgba(0,180,255,0.02)',
-                  border: `1px solid ${C.border}`, borderRadius: 6,
-                  cursor: 'pointer', transition: 'all 0.15s', width: '100%', textAlign: 'left',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = C.borderHi; (e.currentTarget as HTMLElement).style.background = C.cyanFaint; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = C.border; (e.currentTarget as HTMLElement).style.background = 'rgba(0,180,255,0.02)'; }}
-              >
-                <img src={w.icon} alt={w.name}
-                  style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0 }}
-                  onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                />
-                <div>
-                  <div style={{ fontSize: 11, color: C.text, fontWeight: 600, marginBottom: 2 }}>{w.name}</div>
-                  <div style={{ fontSize: 8, letterSpacing: 1, color: C.faint }}>
-                    {isMobile ? 'TAP TO OPEN IN WALLET APP' : 'CLICK TO CONNECT'}
+            {WALLETS.map((w) => {
+              const detected = isMobile ? true :
+                w.name === 'Phantom'  ? !!(window as any).phantom?.solana || !!(window as any).solana?.isPhantom :
+                w.name === 'Solflare' ? !!(window as any).solflare :
+                w.name === 'Backpack' ? !!(window as any).backpack?.solana || !!(window as any).xnft :
+                false;
+
+              return (
+                <React.Fragment key={w.name}>
+                {w.name === 'Solflare' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <button onClick={() => setSolflareExpanded(v => !v)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 14,
+                        padding: '14px 16px', background: 'rgba(0,180,255,0.02)',
+                        border: `1px solid ${solflareExpanded ? C.borderHi : C.border}`, borderRadius: 6,
+                        cursor: 'pointer', transition: 'all 0.15s', width: '100%', textAlign: 'left',
+                      }}
+                    >
+                      <img src={w.icon} alt={w.name}
+                        style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0 }}
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, color: C.text, fontWeight: 600, marginBottom: 2 }}>Solflare</div>
+                        <div style={{ fontSize: 8, letterSpacing: 1, color: C.faint }}>WEB EXTENSION + MOBILE APP</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: C.green, boxShadow: `0 0 6px ${C.green}` }} />
+                        <span style={{ fontSize: 10, color: C.dim }}>{solflareExpanded ? '▲' : '▼'}</span>
+                      </div>
+                    </button>
+
+                    {solflareExpanded && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, animation: 'conFade 0.2s ease both' }}>
+                        <button onClick={() => {
+                          const adapter = wallets.find(a => a.adapter.name.toLowerCase() === 'solflare');
+                          if (adapter) { setSelected('Solflare'); select(adapter.adapter.name as any); onSelected(); }
+                          else window.open('https://solflare.com', '_blank');
+                        }}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '10px 14px', background: 'rgba(0,180,255,0.02)',
+                            border: `1px solid ${C.border}`, borderRadius: 5,
+                            cursor: 'pointer', width: '100%', textAlign: 'left', transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = C.borderHi; (e.currentTarget as HTMLElement).style.background = C.cyanFaint; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = C.border; (e.currentTarget as HTMLElement).style.background = 'rgba(0,180,255,0.02)'; }}
+                        >
+                          <span style={{ fontSize: 14 }}>🌐</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10, color: C.text, marginBottom: 1 }}>Browser Extension</div>
+                            <div style={{ fontSize: 8, color: C.faint, letterSpacing: 1 }}>
+                              {!!(window as any).solflare ? '● DETECTED' : '○ NOT INSTALLED'}
+                            </div>
+                          </div>
+                        </button>
+
+                        <button onClick={() => {
+                          const encodedUrl = encodeURIComponent(window.location.href);
+                          window.location.href = `https://solflare.com/ul/v1/browse/${encodedUrl}?ref=${encodeURIComponent(window.location.origin)}`;
+                        }}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '10px 14px', background: 'rgba(0,180,255,0.02)',
+                            border: `1px solid ${C.border}`, borderRadius: 5,
+                            cursor: 'pointer', width: '100%', textAlign: 'left', transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = C.borderHi; (e.currentTarget as HTMLElement).style.background = C.cyanFaint; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = C.border; (e.currentTarget as HTMLElement).style.background = 'rgba(0,180,255,0.02)'; }}
+                        >
+                          <span style={{ fontSize: 14 }}>📱</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10, color: C.text, marginBottom: 1 }}>Mobile App</div>
+                            <div style={{ fontSize: 8, color: C.faint, letterSpacing: 1 }}>OPENS IN SOLFLARE APP</div>
+                          </div>
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </button>
-            ))}
+                ) : (
+                  <button key={w.name} onClick={() => handleSelect(w)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 14,
+                      padding: '14px 16px', background: 'rgba(0,180,255,0.02)',
+                      border: `1px solid ${C.border}`, borderRadius: 6,
+                      cursor: 'pointer', transition: 'all 0.15s', width: '100%', textAlign: 'left',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = C.borderHi; (e.currentTarget as HTMLElement).style.background = C.cyanFaint; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = C.border; (e.currentTarget as HTMLElement).style.background = 'rgba(0,180,255,0.02)'; }}
+                  >
+                    <img src={w.icon} alt={w.name}
+                      style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0 }}
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 11, color: C.text, fontWeight: 600, marginBottom: 2 }}>{w.name}</div>
+                      <div style={{ fontSize: 8, letterSpacing: 1, color: detected ? C.faint : 'rgba(255,51,85,0.5)' }}>
+                        {isMobile ? 'TAP TO OPEN IN WALLET APP' : (detected ? '● DETECTED' : '○ NOT INSTALLED')}
+                      </div>
+                    </div>
+                    <div style={{
+                      width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                      background: detected ? C.green : C.faint,
+                      boxShadow: detected ? `0 0 6px ${C.green}` : 'none',
+                    }} />
+                  </button>
+                )}
+                </React.Fragment>
+              );
+            })}
           </div>
         )}
 
         <div style={{ marginTop: 16, fontSize: 8, color: C.faint, textAlign: 'center', lineHeight: 1.6 }}>
           {isMobile
-            ? 'Tap a wallet to open it directly in the wallet app'
+            ? 'On mobile, tap a wallet to open it directly in the wallet app'
             : 'New to Solana wallets? We recommend Phantom for beginners'}
         </div>
       </div>
@@ -1419,7 +1441,7 @@ export default function ConnectPanel() {
   ], []);
 
   return (
-    <ConnectionProvider endpoint={import.meta.env.VITE_HELIUS_RPC || "https://api.mainnet-beta.solana.com"}>
+    <ConnectionProvider endpoint={`${window.location.origin}/api/rpc`}>
       <WalletProvider wallets={wallets} autoConnect>
         <ConnectPanelInner />
       </WalletProvider>
@@ -1433,39 +1455,35 @@ function ConnectPanelInner() {
   const wallet = publicKey?.toBase58() ?? phantomDirectWallet ?? null;
 
   const [walletModal, setWalletModal] = useState(false);
-  const [access, setAccess] = useState<AccessInfo | null>(null);
-  const [price, setPrice] = useState<PriceInfo | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [activeTab, setActiveTab] = useState<'mint' | 'claim'>('mint');
+  const [access,    setAccess]    = useState<AccessInfo | null>(null);
+  const [price,     setPrice]     = useState<PriceInfo | null>(null);
+  const [checking,  setChecking]  = useState(false);
+  const [showMint,  setShowMint]  = useState(false);
+  const [activeTab, setActiveTab] = useState<'mint' | 'renew' | 'claim'>('mint');
 
   const loadPrice = useCallback(async () => {
     try {
       const data = await cachedFetch<PriceInfo>('nft_price', async () => {
         const r = await fetch('/api/nft/price');
-        if (!r.ok) throw new Error('Failed to fetch price');
         return r.json();
       }, 60);
       setPrice(data);
-    } catch (err) {
-      console.error('Failed to load price:', err);
-    }
+    } catch {}
   }, []);
 
   const checkAccess = useCallback(async (w: string) => {
     setChecking(true);
     try {
       const r = await fetch(`/api/nft/check/${w}`);
-      if (!r.ok) throw new Error('Access check failed');
       const data: AccessInfo = await r.json();
       setAccess(data);
-      
       if (data.hasAccess) {
+        setShowMint(false);
         (window as any).__walletPublicKey = w;
         localStorage.setItem('connectedWallet', w);
         window.dispatchEvent(new CustomEvent('wallet-connected', { detail: { wallet: w } }));
       }
-    } catch (err) {
-      console.error('Access check error:', err);
+    } catch {
       setAccess({ hasAccess: false, status: 'none' });
     }
     setChecking(false);
@@ -1474,15 +1492,10 @@ function ConnectPanelInner() {
   useEffect(() => { loadPrice(); }, [loadPrice]);
 
   useEffect(() => {
-    if (wallet) {
-      sessionStorage.setItem('mintWallet', wallet);
-      checkAccess(wallet);
-    } else {
-      setAccess(null);
-    }
-  }, [wallet, checkAccess]);
+    if (wallet) checkAccess(wallet);
+    else setAccess(null);
+  }, [wallet]);
 
-  // Phantom auto-connect
   useEffect(() => {
     const phantom = (window as any).phantom?.solana;
     if (!phantom || wallet) return;
@@ -1495,22 +1508,20 @@ function ConnectPanelInner() {
           checkAccess(pk);
           return;
         }
+        const resp = await phantom.connect();
+        const pk = resp.publicKey.toString();
+        setPhantomDirectWallet(pk);
+        checkAccess(pk);
       } catch {}
     }
 
     tryPhantomDirect();
 
     phantom.on?.('accountChanged', (pk: any) => {
-      if (pk) {
-        const pkStr = pk.toString();
-        setPhantomDirectWallet(pkStr);
-        checkAccess(pkStr);
-      } else {
-        setPhantomDirectWallet(null);
-        setAccess(null);
-      }
+      if (pk) { setPhantomDirectWallet(pk.toString()); checkAccess(pk.toString()); }
+      else { setPhantomDirectWallet(null); setAccess(null); }
     });
-  }, [checkAccess]);
+  }, []);
 
   function handleMintSuccess() {
     if (wallet) checkAccess(wallet);
@@ -1583,7 +1594,9 @@ function ConnectPanelInner() {
         <GraceState
           info={access}
           price={price}
-          onMint={() => setActiveTab('mint')}
+          solPrice={price.solPrice}
+          solUsd={price.solUsd}
+          onMint={() => setShowMint(true)}
         />
       )}
 
@@ -1614,7 +1627,7 @@ function ConnectPanelInner() {
           {/* Tabs */}
           <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: `1px solid ${C.border}` }}>
             {([
-              { id: 'mint', label: '◈ MINT NFT' },
+              { id: 'mint',  label: '◈ MINT NFT' },
               { id: 'claim', label: '⬡ CLAIM TRANSFER' },
             ] as const).map(t => (
               <button key={t.id} onClick={() => setActiveTab(t.id)}
@@ -1658,7 +1671,7 @@ function ConnectPanelInner() {
           fontSize: 9, color: C.faint, fontFamily: FM,
         }}>
           <span>SOL/USD: <span style={{ color: C.dim }}>${price.solUsd?.toFixed(0) ?? '—'}</span></span>
-          <span>MINTED: <span style={{ color: C.cyan }}>{price.minted} / 2000</span></span>
+          <span>MINTED: <span style={{ color: C.cyan }}>{price.minted} / 25000</span></span>
           <span>REMAINING (EARLY): <span style={{ color: price.remaining < 200 ? C.red : C.dim }}>{price.remaining}</span></span>
           <span>CURRENT PRICE: <span style={{ color: C.text }}>${price.usdPrice} USDC</span></span>
         </div>
@@ -1667,20 +1680,16 @@ function ConnectPanelInner() {
   );
 }
 
-/* ─── CLAIM PANEL ────────────────────────────────────────────────────────── */
+/* ─── CLAIM PANEL (secondary market) ────────────────────────────────────── */
 function ClaimPanel({ wallet, onSuccess }: { wallet: string; onSuccess: () => void }) {
   const [mintAddress, setMintAddress] = useState('');
-  const [claiming, setClaiming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [claiming,    setClaiming]    = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
+  const [success,     setSuccess]     = useState(false);
 
   async function handleClaim() {
-    if (!mintAddress.trim()) {
-      setError('Enter the NFT mint address');
-      return;
-    }
-    setClaiming(true);
-    setError(null);
+    if (!mintAddress.trim()) { setError('Enter the NFT mint address'); return; }
+    setClaiming(true); setError(null);
     try {
       const res = await fetch('/api/nft/claim', {
         method: 'POST',
@@ -1688,15 +1697,9 @@ function ClaimPanel({ wallet, onSuccess }: { wallet: string; onSuccess: () => vo
         body: JSON.stringify({ wallet, mintAddress: mintAddress.trim() }),
       });
       const data = await res.json();
-      if (data.success) {
-        setSuccess(true);
-        onSuccess();
-      } else {
-        setError(data.error || 'Claim failed');
-      }
-    } catch {
-      setError('Network error — please try again');
-    }
+      if (data.success) { setSuccess(true); onSuccess(); }
+      else setError(data.error || 'Claim failed');
+    } catch { setError('Network error — please try again'); }
     setClaiming(false);
   }
 
@@ -1718,14 +1721,16 @@ function ClaimPanel({ wallet, onSuccess }: { wallet: string; onSuccess: () => vo
       }}>
         <div style={{ color: C.text, fontWeight: 700, marginBottom: 6 }}>⬡ SECONDARY MARKET CLAIM</div>
         If you purchased a ProtocolHub NFT on a secondary marketplace (Magic Eden, Tensor, etc.),
-        enter the mint address below to activate access for your wallet.
+        enter the mint address below to activate access for your wallet.<br /><br />
+        <span style={{ color: C.orange, fontSize: 9 }}>
+          ⚑ Note: Price lock does not transfer. Renewal will be at current market price.
+        </span>
       </div>
 
       <div>
         <div style={{ fontSize: 8, color: C.faint, letterSpacing: 2, marginBottom: 6 }}>NFT MINT ADDRESS</div>
         <input
-          value={mintAddress}
-          onChange={e => setMintAddress(e.target.value)}
+          value={mintAddress} onChange={e => setMintAddress(e.target.value)}
           placeholder="Paste mint address from your wallet..."
           style={{
             width: '100%', background: C.bgCard, border: `1px solid ${C.border}`,
@@ -1746,14 +1751,12 @@ function ClaimPanel({ wallet, onSuccess }: { wallet: string; onSuccess: () => vo
       )}
 
       <button
-        onClick={handleClaim}
-        disabled={claiming || !mintAddress.trim()}
+        onClick={handleClaim} disabled={claiming || !mintAddress.trim()}
         style={{
           fontFamily: FM, fontSize: 11, letterSpacing: 3, fontWeight: 700,
-          color: claiming ? C.dim : '#000',
-          background: claiming ? C.cyanFaint : C.cyan,
-          border: `1px solid ${claiming ? C.border : C.cyan}`,
-          borderRadius: 4, padding: '12px', cursor: claiming ? 'not-allowed' : 'pointer',
+          color: claiming ? C.dim : '#000', background: claiming ? C.cyanFaint : C.cyan,
+          border: `1px solid ${claiming ? C.border : C.cyan}`, borderRadius: 4,
+          padding: '12px', cursor: claiming ? 'not-allowed' : 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
           boxShadow: claiming ? 'none' : `0 0 20px rgba(0,180,255,0.25)`,
           transition: 'all 0.2s',

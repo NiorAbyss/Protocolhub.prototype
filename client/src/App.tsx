@@ -228,18 +228,22 @@ function HUD() {
         // Gate is on — verify current user still has access
         const wallet = getConnectedWallet();
         if (!wallet) {
-          // No wallet — kick to connect
-          setActiveTab('NONE');
-          return;
+  // No wallet — only close if viewing a gated panel
+  if (GATED[activeTab]) {
+    setActiveTab('NONE');
+  }
+  return;
         }
 
         // Check NFT access
         const r2 = await fetch(`/api/nft/check/${wallet}`);
         const d2  = await r2.json();
         if (!d2.hasAccess) {
-          // Lost access — close panel immediately
-          setActiveTab('NONE');
-          accessCache.current = null;
+  // Lost access — only close if viewing a gated panel
+  if (GATED[activeTab]) {
+    setActiveTab('NONE');
+  }
+  accessCache.current = null;
         }
       } catch {}
     };
@@ -247,7 +251,7 @@ function HUD() {
     // Poll every 30 seconds
     const t = setInterval(poll, 30_000);
     return () => clearInterval(t);
-  }, []);
+  }, [activeTab]);
 
   const toggleToken = (id: string) => {
     setSelectedTokens((prev: string[]) =>
