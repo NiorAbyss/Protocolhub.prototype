@@ -2247,6 +2247,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Health ─────────────────────────────────────────
+
+  // Legal pages
+  app.get('/privacy-policy', (_req: any, res: any) => {
+    res.sendFile(path.join(__dirname, '../client/public/privacy-policy.html'));
+  });
+  app.get('/terms', (_req: any, res: any) => {
+    res.sendFile(path.join(__dirname, '../client/public/terms.html'));
+  });
+  app.get('/disclaimer', (_req: any, res: any) => {
+    res.sendFile(path.join(__dirname, '../client/public/disclaimer.html'));
+  });
+
   app.get("/api/health", (_req: any, res: any) => res.json({ status: "ok", ts: Date.now() }));
 
   /* =================================================== */

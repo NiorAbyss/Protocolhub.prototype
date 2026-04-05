@@ -24,7 +24,7 @@ if (typeof document !== 'undefined') {
     @keyframes conFade    { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
     @keyframes conIn      { from { opacity:0; } to { opacity:1; } }
     @keyframes conUp      { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
-6    @keyframes conScan    { 0% { top:0; opacity:1; } 100% { top:100%; opacity:0; } }
+    @keyframes conScan    { 0% { top:0; opacity:1; } 100% { top:100%; opacity:0; } }
     @keyframes conBlink   { 0%,49% { opacity:1; } 50%,100% { opacity:0; } }
     @keyframes conShake   { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-3px)} 40%{transform:translateX(3px)} 60%{transform:translateX(-2px)} 80%{transform:translateX(2px)} }
   `;
@@ -289,7 +289,7 @@ function TierCard({
 }
 
 /* ─── STATE: NO WALLET ───────────────────────────────────────────────────── */
-function NoWalletState({ onConnect }: { onConnect: () => void }) {
+function NoWalletState({ onConnect, agreed, onAgree }: { onConnect: () => void; agreed: boolean; onAgree: () => void }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -326,12 +326,34 @@ function NoWalletState({ onConnect }: { onConnect: () => void }) {
         </div>
       </div>
 
-      <button onClick={onConnect}
+      {/* Agreement checkbox */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%', maxWidth: 340 }}>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', padding: '12px 16px', border: `1px solid ${agreed ? 'rgba(0,180,255,0.3)' : C.border}`, borderRadius: 6, background: agreed ? 'rgba(0,180,255,0.04)' : C.bgCard, transition: 'all 0.2s' }}>
+          <div onClick={onAgree} style={{ width: 16, height: 16, borderRadius: 3, border: `2px solid ${agreed ? C.cyan : C.faint}`, background: agreed ? C.cyan : 'transparent', flexShrink: 0, marginTop: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.15s' }}>
+            {agreed && <span style={{ color: '#000', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+          </div>
+          <span style={{ fontSize: 9, color: C.dim, lineHeight: 1.7, fontFamily: FM }}>
+            I agree to the{' '}
+            <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" style={{ color: C.cyan }} onClick={e => e.stopPropagation()}>Privacy Policy</a>
+            {', '}
+            <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.cyan }} onClick={e => e.stopPropagation()}>Terms of Service</a>
+            {', and '}
+            <a href="/disclaimer" target="_blank" rel="noopener noreferrer" style={{ color: C.cyan }} onClick={e => e.stopPropagation()}>Disclaimer</a>
+            . I understand that all data is for informational purposes only and not financial advice.
+          </span>
+        </label>
+      </div>
+
+      <button onClick={agreed ? onConnect : undefined}
         style={{
           fontFamily: FM, fontSize: 11, letterSpacing: 3, fontWeight: 700,
-          color: C.cyan, background: C.cyanFaint,
-          border: `1px solid ${C.borderHi}`, borderRadius: 4,
-          padding: '12px 32px', cursor: 'pointer',
+          color: agreed ? C.cyan : C.faint,
+          background: agreed ? C.cyanFaint : 'rgba(0,180,255,0.02)',
+          border: `1px solid ${agreed ? C.borderHi : C.border}`,
+          borderRadius: 4, padding: '12px 32px',
+          cursor: agreed ? 'pointer' : 'not-allowed',
+          opacity: agreed ? 1 : 0.5,
+          transition: 'all 0.2s',
         }}>
         ◈ CONNECT WALLET
       </button>
@@ -1455,6 +1477,7 @@ function ConnectPanelInner() {
   const wallet = publicKey?.toBase58() ?? phantomDirectWallet ?? null;
 
   const [walletModal, setWalletModal] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [access,    setAccess]    = useState<AccessInfo | null>(null);
   const [price,     setPrice]     = useState<PriceInfo | null>(null);
   const [checking,  setChecking]  = useState(false);
@@ -1583,7 +1606,7 @@ function ConnectPanelInner() {
       )}
 
       {!checking && !connecting && !wallet && (
-        <NoWalletState onConnect={() => setWalletModal(true)} />
+        <NoWalletState onConnect={() => setWalletModal(true)} agreed={agreed} onAgree={() => setAgreed(v => !v)} />
       )}
 
       {!checking && wallet && access?.status === 'revoked' && (
